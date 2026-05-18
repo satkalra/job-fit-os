@@ -612,21 +612,27 @@
               <button id="add-company" class="button secondary" type="button">Add</button>
             </div>
             <div id="company-tags" class="tag-list"></div>
-            <p class="muted">JobFit auto-detects ATS (Greenhouse/Lever/Ashby) per company</p>
+            <p class="muted">JobFit scores jobs from these companies higher (+10 pts). ATS boards are fetched directly when available.</p>
+          </div>
+          <div class="field">
+            <label for="location-input">Preferred locations</label>
+            <div class="inline-row">
+              <input id="location-input" type="text" placeholder="Add city or region">
+              <button id="add-location" class="button secondary" type="button">Add</button>
+            </div>
+            <div id="location-tags" class="tag-list"></div>
+            <div class="tag-list" style="margin-top:6px">
+              <button class="tag" type="button" data-quick-location="Remote">+ Remote</button>
+              <button class="tag" type="button" data-quick-location="NYC">+ NYC</button>
+              <button class="tag" type="button" data-quick-location="SF">+ SF</button>
+              <button class="tag" type="button" data-quick-location="Austin">+ Austin</button>
+              <button class="tag" type="button" data-quick-location="Seattle">+ Seattle</button>
+            </div>
+            <p class="muted">Matching jobs score +5 pts. Nearby cities and aliases are expanded automatically.</p>
           </div>
           <div class="field">
             <label for="min-salary">Minimum salary</label>
             <input id="min-salary" type="number" min="0" step="1000" placeholder="80000">
-          </div>
-          <div class="switch-row">
-            <div>
-              <div class="label">Remote only</div>
-              <p class="muted">Limit discovery to remote roles.</p>
-            </div>
-            <label class="switch" aria-label="Remote only">
-              <input id="remote-only" type="checkbox">
-              <span class="slider-toggle"></span>
-            </label>
           </div>
           <div class="field">
             <label for="keywords">Keywords</label>
@@ -720,6 +726,7 @@
     let user = readUser();
     let currentScreen = 'onboarding';
     let companies = [];
+    let locations = [];
 
     const screens = {
       onboarding: document.getElementById('screen-onboarding'),
@@ -974,28 +981,66 @@
     }
 
     function initializePreferences() {
-      if (!companies.length) {
-        companies = (user && user.target_companies && user.target_companies.length)
-          ? user.target_companies.map((company) => typeof company === 'string' ? company : company.name).filter(Boolean)
-          : [...DEFAULT_COMPANIES[(user && user.profile_type) || 'engineering']];
-      }
+      companies = (user && user.target_companies && user.target_companies.length)
+        ? user.target_companies.map((company) => typeof company === 'string' ? company : company.name).filter(Boolean)
+        : [...DEFAULT_COMPANIES[(user && user.profile_type) || 'engineering']];
+      locations = (user && user.preferred_locations && user.preferred_locations.length)
+        ? [...user.preferred_locations]
+        : [];
       document.getElementById('keywords').value = user && user.keywords
         ? user.keywords
         : DEFAULT_KEYWORDS[(user && user.profile_type) || 'engineering'];
       document.getElementById('min-salary').value = user && user.min_salary ? user.min_salary : '';
-      document.getElementById('remote-only').checked = Boolean(user && user.remote_only);
       renderCompanyTags();
+      renderLocationTags();
     }
 
     function setupPreferences() {
       document.getElementById('add-company').addEventListener('click', addCompany);
       document.getElementById('company-input').addEventListener('keydown', (event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          addCompany();
-        }
+        if (event.key === 'Enter') { event.preventDefault(); addCompany(); }
+      });
+      document.getElementById('add-location').addEventListener('click', addLocation);
+      document.getElementById('location-input').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); addLocation(); }
+      });
+      document.querySelectorAll('[data-quick-location]').forEach((button) => {
+        button.addEventListener('click', () => {
+          const value = button.dataset.quickLocation;
+          if (!locations.some((l) => l.toLowerCase() === value.toLowerCase())) {
+            locations.push(value);
+            renderLocationTags();
+          }
+        });
       });
       document.getElementById('save-preferences').addEventListener('click', savePreferences);
+    }
+
+    function addLocation() {
+      const input = document.getElementById('location-input');
+      const value = input.value.trim();
+      if (!value) return;
+      if (!locations.some((l) => l.toLowerCase() === value.toLowerCase())) {
+        locations.push(value);
+      }
+      input.value = '';
+      renderLocationTags();
+    }
+
+    function renderLocationTags() {
+      const target = document.getElementById('location-tags');
+      target.innerHTML = locations.map((loc, index) => `
+        <span class="tag">
+          <span>${escapeHtml(loc)}</span>
+          <button type="button" aria-label="Remove ${escapeHtml(loc)}" data-remove-location="${index}">×</button>
+        </span>
+      `).join('');
+      target.querySelectorAll('[data-remove-location]').forEach((button) => {
+        button.addEventListener('click', () => {
+          locations.splice(Number(button.dataset.removeLocation), 1);
+          renderLocationTags();
+        });
+      });
     }
 
     function addCompany() {
@@ -1030,8 +1075,8 @@
       const minSalaryValue = document.getElementById('min-salary').value;
       const payload = {
         target_companies: companies.map((name) => ({ name })),
+        preferred_locations: locations.length ? locations : null,
         min_salary: minSalaryValue ? Number(minSalaryValue) : null,
-        remote_only: document.getElementById('remote-only').checked,
         keywords: document.getElementById('keywords').value.trim()
       };
       setError('preferences-error', '');
@@ -1178,7 +1223,8 @@
           profile_type: data.profile_type || user.profile_type,
           keywords: data.keywords,
           min_salary: data.min_salary,
-          remote_only: data.remote_only,
+          preferred_locations: data.preferred_locations || null,
+          target_companies: data.target_companies || user.target_companies || null,
           briefing_time: data.briefing_time || user.briefing_time,
           timezone: data.timezone || user.timezone,
           weight_role_match: data.weight_role_match,

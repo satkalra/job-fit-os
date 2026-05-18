@@ -41,8 +41,10 @@ class UserProfile(Base):
     keywords: Mapped[str | None] = mapped_column(Text)
     seniority: Mapped[str | None] = mapped_column(Text)
     min_salary: Mapped[int | None] = mapped_column(Integer)
-    remote_only: Mapped[bool] = mapped_column(Boolean, default=False)
     target_companies: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON().with_variant(JSONB, "postgresql"))
+    preferred_locations: Mapped[list[str] | None] = mapped_column(
+        JSON().with_variant(ARRAY(Text), "postgresql"), nullable=True
+    )
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     briefing_time: Mapped[str] = mapped_column(Text, default="07:00")
     timezone: Mapped[str] = mapped_column(Text, default="America/New_York")

@@ -14,6 +14,16 @@ def test_overlap_short_words_ignored():
     assert keyword_overlap_score("the a an", "the a an") == 0.0
 
 
+def test_overlap_role_abbreviation_matches_full_form():
+    score = keyword_overlap_score("experienced swe developer", "software engineer python fastapi")
+    assert score >= 0.08, f"Expected >= 0.08, got {score}"
+
+
+def test_overlap_ml_abbreviation_matches_full_form():
+    score = keyword_overlap_score("ml researcher background", "machine learning engineer role")
+    assert score >= 0.08, f"Expected >= 0.08, got {score}"
+
+
 def test_gate_filter_rejects_intern():
     job = RawJob(title="Intern Software Engineer", company="Acme", source="ats")
     assert len(gate_filter([job], seniority="senior", min_salary=None)) == 0

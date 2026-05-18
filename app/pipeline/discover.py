@@ -7,6 +7,7 @@ from anthropic import AsyncAnthropic
 from app.config import settings
 from app.models.user import UserProfile
 from app.schemas.job import RawJob
+from app.utils.aliases import ROLE_ALIASES
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY or "not-set")
 
@@ -101,20 +102,29 @@ async def _search_with_haiku(profile: UserProfile) -> list[RawJob]:
         return []
     try:
         domains_str = ", ".join(profile.domains or [])
+        for abbr, expansions in ROLE_ALIASES.items():
+            if abbr in domains_str.lower():
+                domains_str += ", " + ", ".join(sorted(expansions))
+        locations_str = ", ".join(profile.preferred_locations or []) or "any"
         prompt = (
-            f"Find 5 job postings posted in the last 7 days for roles in: {domains_str}. "
+            f"Search for job postings for roles in: {domains_str}. "
             f"Keywords: {profile.keywords or ''}. "
-            "Return a JSON array with objects: {title, company, location, url, description, posted_date}. "
-            "Return ONLY the JSON array, no other text."
+            f"Locations: {locations_str} (include remote). "
+            "Find as many real job postings as you can (target 10-20). "
+            "For each job you find, return it in this JSON format. "
+            "If a field is unknown, use null — do NOT refuse to return the job just because some fields are missing. "
+            "ALWAYS return valid JSON even if data is partial. "
+            'Return ONLY a JSON array: [{"title":"...","company":"...","location":"...","url":"...","description":"...","posted_date":null}]. '
+            "No prose, no explanation, no markdown — just the JSON array."
         )
         response = await _anthropic.messages.create(
             model="claude-haiku-4-5-20251001",
-            max_tokens=2000,
+            max_tokens=4000,
             tools=[{"type": "web_search_20250305", "name": "web_search"}],
             messages=[{"role": "user", "content": prompt}],
         )
         for block in response.content:
-            text = getattr(block, "text", "").strip()
+            text = (getattr(block, "text", "") or "").strip()
             start = text.find("[")
             end = text.rfind("]") + 1
             if start >= 0 and end > start:
@@ -141,6 +151,8 @@ async def discover_jobs(profile: UserProfile) -> list[RawJob]:
         for company in profile.target_companies or []:
             ats_type = company.get("ats", "")
             token = company.get("token", "")
+            if not ats_type or not token:
+                continue
             if ats_type == "greenhouse":
                 ats_tasks.append(_fetch_greenhouse(token, client))
             elif ats_type == "lever":

@@ -2,10 +2,13 @@ import re
 from datetime import datetime
 
 from app.schemas.job import RawJob
+from app.utils.aliases import ROLE_ALIASES
 
 
 def _tokenize(text: str) -> set[str]:
     text = text.lower()
+    for abbr, expansions in ROLE_ALIASES.items():
+        text = re.sub(r"\b" + re.escape(abbr) + r"\b", " ".join(sorted(expansions)), text)
     text = re.sub(r"[^\w\s]", " ", text)
     return {w for w in text.split() if len(w) > 3}
 
