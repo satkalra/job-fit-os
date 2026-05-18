@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: jobfit-os
+    env: python
+    buildCommand: pip install -r requirements.txt && alembic upgrade head
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: jobfit-os-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: GMAIL_ADDRESS
+        sync: false
+      - key: GMAIL_APP_PASSWORD
+        sync: false
+      - key: EMAIL_FROM_NAME
+        value: JobFit OS
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRY_DAYS
+        value: "7"
+      - key: BASE_URL
+        value: https://jobfit-os.onrender.com
+      - key: ENVIRONMENT
+        value: production
+
+databases:
+  - name: jobfit-os-db
+    databaseName: jobfit_os
+    plan: free

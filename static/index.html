@@ -1,0 +1,1222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JobFit OS</title>
+  <style>
+    :root {
+      --bg: #080B0F;
+      --surface: #0D1117;
+      --card: #111820;
+      --border: #1C2630;
+      --text: #E8EDF2;
+      --muted: #5A6B7A;
+      --accent: #00C8FF;
+      --success: #00E87A;
+      --error: #FF4D6A;
+      color-scheme: dark;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    button,
+    input,
+    textarea,
+    select {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .shell {
+      width: 100%;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .nav {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      width: 100%;
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 18px 20px 0;
+    }
+
+    .nav.is-visible {
+      display: flex;
+    }
+
+    .nav-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+    }
+
+    .nav-link {
+      padding: 0 0 6px;
+      background: transparent;
+      color: var(--muted);
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+    }
+
+    .nav-link.is-active {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    .nav-email {
+      max-width: 180px;
+      overflow: hidden;
+      color: var(--muted);
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 14px;
+    }
+
+    .screen {
+      display: none;
+    }
+
+    .screen.is-active {
+      display: block;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(30px, 6vw, 44px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 0 0 6px;
+      font-size: 24px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0;
+      font-size: 17px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .muted {
+      color: var(--muted);
+    }
+
+    .form {
+      display: grid;
+      gap: 16px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    label,
+    .label {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    input,
+    textarea,
+    select {
+      width: 100%;
+      min-height: 46px;
+      padding: 11px 12px;
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      outline: none;
+    }
+
+    input:focus,
+    textarea:focus,
+    select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent), transparent 78%);
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 200px;
+    }
+
+    .mono {
+      font-family: "JetBrains Mono", "Fira Code", monospace;
+    }
+
+    .radio-group {
+      display: grid;
+      gap: 10px;
+    }
+
+    .radio-card {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-weight: 600;
+    }
+
+    .radio-card input {
+      width: 18px;
+      min-height: 18px;
+      accent-color: var(--accent);
+    }
+
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 46px;
+      padding: 0 16px;
+      background: var(--accent);
+      color: #001018;
+      border-radius: 10px;
+      font-weight: 800;
+    }
+
+    .button.secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .button.ghost {
+      min-height: auto;
+      padding: 0;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 650;
+    }
+
+    .button.full {
+      width: 100%;
+    }
+
+    .button.big {
+      min-height: 60px;
+      font-size: 18px;
+    }
+
+    .error {
+      min-height: 18px;
+      color: var(--error);
+      font-size: 14px;
+    }
+
+    .success {
+      color: var(--success);
+      font-weight: 750;
+    }
+
+    .tabs,
+    .quick-row,
+    .inline-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .tab {
+      flex: 1;
+      min-width: 140px;
+      min-height: 42px;
+      background: var(--surface);
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-weight: 750;
+    }
+
+    .tab.is-active {
+      color: var(--text);
+      border-color: var(--accent);
+    }
+
+    .tab-panel {
+      display: none;
+    }
+
+    .tab-panel.is-active {
+      display: grid;
+      gap: 16px;
+    }
+
+    .preview {
+      overflow-wrap: anywhere;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .tag-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      max-width: 100%;
+      padding: 7px 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .tag span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .tag button {
+      background: transparent;
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1;
+    }
+
+    .switch-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+
+    .switch {
+      position: relative;
+      width: 54px;
+      height: 30px;
+      flex: 0 0 auto;
+    }
+
+    .switch input {
+      width: 0;
+      height: 0;
+      opacity: 0;
+    }
+
+    .slider-toggle {
+      position: absolute;
+      inset: 0;
+      background: #26313B;
+      border-radius: 999px;
+      transition: background 160ms ease;
+    }
+
+    .slider-toggle::before {
+      content: "";
+      position: absolute;
+      width: 22px;
+      height: 22px;
+      left: 4px;
+      top: 4px;
+      background: var(--text);
+      border-radius: 50%;
+      transition: transform 160ms ease;
+    }
+
+    .switch input:checked + .slider-toggle {
+      background: var(--accent);
+    }
+
+    .switch input:checked + .slider-toggle::before {
+      transform: translateX(24px);
+      background: #001018;
+    }
+
+    .weight-row {
+      display: grid;
+      gap: 8px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .weight-row:last-child {
+      border-bottom: 0;
+    }
+
+    .weight-head,
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    input[type="range"] {
+      padding: 0;
+      accent-color: var(--accent);
+    }
+
+    .total {
+      font-weight: 850;
+    }
+
+    .total.bad {
+      color: var(--error);
+    }
+
+    .total.good {
+      color: var(--success);
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .stat {
+      display: flex;
+      justify-content: space-between;
+      gap: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .stat:last-child {
+      padding-bottom: 0;
+      border-bottom: 0;
+    }
+
+    .result-flow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      font-size: 18px;
+      font-weight: 850;
+      text-align: center;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid color-mix(in srgb, var(--accent), transparent 55%);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 850ms linear infinite;
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    @media (max-width: 560px) {
+      .shell {
+        padding: 16px;
+      }
+
+      .nav {
+        align-items: flex-start;
+        flex-direction: column-reverse;
+        padding: 16px 16px 0;
+      }
+
+      .card {
+        padding: 16px;
+      }
+
+      .inline-row > * {
+        flex: 1 1 100%;
+      }
+
+      .button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <nav id="nav" class="nav" aria-label="Primary">
+    <div class="nav-links">
+      <button class="nav-link" data-nav="resume">Resume</button>
+      <button class="nav-link" data-nav="preferences">Preferences</button>
+      <button class="nav-link" data-nav="weights">Weights</button>
+      <button class="nav-link" data-nav="dashboard">Dashboard</button>
+    </div>
+    <div id="nav-email" class="nav-email"></div>
+  </nav>
+
+  <main class="shell">
+    <section id="screen-onboarding" class="screen">
+      <div class="stack">
+        <div>
+          <h1>JobFit OS</h1>
+          <p class="muted">Daily job discovery, scoring, and briefing tuned to your profile.</p>
+        </div>
+        <form id="onboarding-form" class="card form">
+          <div class="field">
+            <label for="full-name">Full name</label>
+            <input id="full-name" name="name" type="text" autocomplete="name" required>
+            <div class="error" id="name-error"></div>
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input id="email" name="email" type="email" autocomplete="email" required>
+            <div class="error" id="email-error"></div>
+          </div>
+          <div class="field">
+            <div class="label">Role type</div>
+            <div class="radio-group">
+              <label class="radio-card">
+                <input type="radio" name="profile_type" value="engineering" checked>
+                <span>Engineering / AI / Software</span>
+              </label>
+              <label class="radio-card">
+                <input type="radio" name="profile_type" value="analytics">
+                <span>Analytics / Data Science</span>
+              </label>
+            </div>
+          </div>
+          <div class="field">
+            <label for="briefing-time">Briefing time</label>
+            <input id="briefing-time" name="briefing_time" type="time" value="07:00">
+          </div>
+          <div class="field">
+            <label for="timezone">Timezone</label>
+            <select id="timezone" name="timezone">
+              <option>America/New_York</option>
+              <option>America/Chicago</option>
+              <option>America/Denver</option>
+              <option>America/Los_Angeles</option>
+              <option>Europe/London</option>
+              <option>Europe/Paris</option>
+              <option>Asia/Dubai</option>
+              <option>Asia/Kolkata</option>
+              <option>Asia/Singapore</option>
+              <option>Australia/Sydney</option>
+            </select>
+          </div>
+          <div class="error" id="onboarding-error"></div>
+          <button id="onboarding-submit" class="button full" type="submit">Get Started →</button>
+        </form>
+      </div>
+    </section>
+
+    <section id="screen-resume" class="screen">
+      <div class="stack">
+        <div>
+          <h2>Resume</h2>
+          <p class="muted">Upload a PDF or paste resume text for scoring context.</p>
+        </div>
+        <div class="card stack">
+          <div class="tabs">
+            <button class="tab is-active" data-tab="upload" type="button">Upload PDF</button>
+            <button class="tab" data-tab="paste" type="button">Paste Text</button>
+          </div>
+          <div id="resume-upload-panel" class="tab-panel is-active">
+            <div class="field">
+              <label for="resume-file">PDF resume</label>
+              <input id="resume-file" type="file" accept=".pdf,application/pdf">
+              <p class="muted">Max 5MB</p>
+              <div class="error" id="resume-upload-error"></div>
+            </div>
+            <button id="upload-resume" class="button" type="button">Upload PDF</button>
+            <div id="upload-success" class="stack"></div>
+          </div>
+          <div id="resume-paste-panel" class="tab-panel">
+            <div class="field">
+              <label for="resume-text">Resume text</label>
+              <textarea id="resume-text" class="mono" spellcheck="true"></textarea>
+              <div class="status-row">
+                <span id="resume-word-count" class="muted mono">0 words</span>
+                <span class="muted">Minimum 100 words</span>
+              </div>
+              <div class="error" id="resume-text-error"></div>
+            </div>
+            <button id="save-resume-text" class="button" type="button" disabled>Save Resume Text</button>
+            <div id="text-success"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-preferences" class="screen">
+      <div class="stack">
+        <div>
+          <h2>Preferences</h2>
+          <p class="muted">Set the companies, filters, and signals for daily discovery.</p>
+        </div>
+        <div class="card form">
+          <div class="field">
+            <label for="company-input">Target companies</label>
+            <div class="inline-row">
+              <input id="company-input" type="text" placeholder="Add company">
+              <button id="add-company" class="button secondary" type="button">Add</button>
+            </div>
+            <div id="company-tags" class="tag-list"></div>
+            <p class="muted">JobFit auto-detects ATS (Greenhouse/Lever/Ashby) per company</p>
+          </div>
+          <div class="field">
+            <label for="min-salary">Minimum salary</label>
+            <input id="min-salary" type="number" min="0" step="1000" placeholder="80000">
+          </div>
+          <div class="switch-row">
+            <div>
+              <div class="label">Remote only</div>
+              <p class="muted">Limit discovery to remote roles.</p>
+            </div>
+            <label class="switch" aria-label="Remote only">
+              <input id="remote-only" type="checkbox">
+              <span class="slider-toggle"></span>
+            </label>
+          </div>
+          <div class="field">
+            <label for="keywords">Keywords</label>
+            <input id="keywords" type="text" placeholder="Python, FastAPI, LLMs">
+          </div>
+          <div class="error" id="preferences-error"></div>
+          <div id="preferences-success"></div>
+          <button id="save-preferences" class="button" type="button">Save Preferences</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-weights" class="screen">
+      <div class="stack">
+        <div>
+          <h2>Scoring Weights</h2>
+          <p class="muted">Tune how JobFit ranks each opportunity.</p>
+        </div>
+        <div class="card stack">
+          <div id="weights-list"></div>
+          <div class="status-row">
+            <span id="weights-total" class="total good">Total: 100 / 100 - Perfect</span>
+          </div>
+          <div class="error" id="weights-error"></div>
+          <div id="weights-success"></div>
+          <button id="save-weights" class="button" type="button">Save Weights</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="screen-dashboard" class="screen">
+      <div class="stack">
+        <div>
+          <h1 id="greeting">Good morning</h1>
+          <p class="muted">Your briefing command center.</p>
+        </div>
+        <div class="card status-grid">
+          <div class="stat">
+            <span class="muted">Last briefing</span>
+            <strong id="last-briefing">Not run yet</strong>
+          </div>
+          <div class="stat">
+            <span class="muted">Next scheduled</span>
+            <strong id="next-scheduled">07:00 America/New_York</strong>
+          </div>
+          <div class="stat">
+            <span class="muted">Email</span>
+            <strong id="status-email"></strong>
+          </div>
+        </div>
+        <div class="card stack">
+          <button id="run-briefing" class="button big full" type="button">▸ Run Briefing Now</button>
+          <div id="briefing-progress" class="muted"></div>
+          <div class="error" id="briefing-error"></div>
+          <div id="briefing-result"></div>
+        </div>
+        <div class="quick-row">
+          <button class="button secondary" data-nav="resume" type="button">Resume</button>
+          <button class="button secondary" data-nav="preferences" type="button">Preferences</button>
+          <button class="button secondary" data-nav="weights" type="button">Weights</button>
+        </div>
+        <button id="reset-user" class="button ghost" type="button">Reset / Re-onboard</button>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const BASE_URL = '';
+    const STORAGE_KEY = 'jobfit_user';
+    const DEFAULT_ACCENT = '#00C8FF';
+    const ACCENTS = {
+      engineering: '#00C8FF',
+      analytics: '#FF5FA0'
+    };
+    const DEFAULT_COMPANIES = {
+      engineering: ['Anthropic', 'OpenAI', 'Stripe', 'Linear', 'Vercel', 'Cohere', 'Scale AI', 'Notion'],
+      analytics: ['Spotify', 'Airbnb', 'dbt Labs', 'Databricks', 'Snowflake', 'Pinterest', 'Plaid', 'Amplitude']
+    };
+    const DEFAULT_KEYWORDS = {
+      engineering: 'AI, software engineering, Python, TypeScript, FastAPI, LLMs, infrastructure',
+      analytics: 'analytics, data science, SQL, Python, experimentation, metrics, dashboards'
+    };
+    const WEIGHTS = [
+      ['weight_role_match', 'Role Match', 30],
+      ['weight_skills_match', 'Skills Match', 30],
+      ['weight_experience_level', 'Experience Level', 20],
+      ['weight_compensation', 'Compensation', 10],
+      ['weight_cultural', 'Culture / Company', 10]
+    ];
+
+    let user = readUser();
+    let currentScreen = 'onboarding';
+    let companies = [];
+
+    const screens = {
+      onboarding: document.getElementById('screen-onboarding'),
+      resume: document.getElementById('screen-resume'),
+      preferences: document.getElementById('screen-preferences'),
+      weights: document.getElementById('screen-weights'),
+      dashboard: document.getElementById('screen-dashboard')
+    };
+
+    function readUser() {
+      try {
+        return JSON.parse(localStorage.getItem(STORAGE_KEY)) || null;
+      } catch {
+        return null;
+      }
+    }
+
+    function saveUser(nextUser) {
+      user = { ...(user || {}), ...nextUser };
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+      applyUserChrome();
+    }
+
+    function clearUser() {
+      user = null;
+      localStorage.removeItem(STORAGE_KEY);
+      applyUserChrome();
+      showScreen('onboarding');
+    }
+
+    function applyUserChrome() {
+      const profileType = user && user.profile_type;
+      document.documentElement.style.setProperty('--accent', ACCENTS[profileType] || DEFAULT_ACCENT);
+      const nav = document.getElementById('nav');
+      nav.classList.toggle('is-visible', Boolean(user && user.management_token));
+      document.getElementById('nav-email').textContent = user && user.email ? user.email : '';
+    }
+
+    function showScreen(name) {
+      currentScreen = name;
+      Object.entries(screens).forEach(([screenName, element]) => {
+        element.classList.toggle('is-active', screenName === name);
+      });
+      document.querySelectorAll('[data-nav]').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.nav === name);
+      });
+      if (name === 'dashboard') renderDashboard();
+      if (name === 'preferences') initializePreferences();
+      if (name === 'weights') renderWeights();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function setError(id, message) {
+      document.getElementById(id).textContent = message || '';
+    }
+
+    function setLoading(button, isLoading, loadingText) {
+      if (!button.dataset.originalText) {
+        button.dataset.originalText = button.textContent;
+      }
+      button.disabled = isLoading;
+      button.textContent = isLoading ? loadingText : button.dataset.originalText;
+    }
+
+    async function apiFetch(path, options = {}) {
+      const headers = new Headers(options.headers || {});
+      const hasBody = options.body !== undefined && !(options.body instanceof FormData);
+      if (hasBody && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json');
+      }
+      if (user && user.management_token && !headers.has('Authorization')) {
+        headers.set('Authorization', `Bearer ${user.management_token}`);
+      }
+
+      const response = await fetch(`${BASE_URL}${path}`, { ...options, headers });
+      if (response.status === 401 || response.status === 403) {
+        clearUser();
+        throw new Error('Session expired. Please onboard again.');
+      }
+
+      let data = null;
+      const text = await response.text();
+      if (text) {
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = { detail: text };
+        }
+      }
+
+      if (!response.ok) {
+        const detail = data && data.detail;
+        if (typeof detail === 'string') throw new Error(detail);
+        if (detail && typeof detail.error === 'string') throw new Error(detail.error);
+        throw new Error(`Request failed with status ${response.status}`);
+      }
+      return data || {};
+    }
+
+    function wordCount(text) {
+      return text.trim().split(/\s+/).filter(Boolean).length;
+    }
+
+    function renderSuccess(targetId, html) {
+      document.getElementById(targetId).innerHTML = html;
+    }
+
+    function setupNavigation() {
+      document.querySelectorAll('[data-nav]').forEach((button) => {
+        button.addEventListener('click', () => {
+          if (!user || !user.management_token) return;
+          showScreen(button.dataset.nav);
+        });
+      });
+    }
+
+    function setupOnboarding() {
+      const form = document.getElementById('onboarding-form');
+      const button = document.getElementById('onboarding-submit');
+      form.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        setError('onboarding-error', '');
+        const formData = new FormData(form);
+        const name = String(formData.get('name') || '').trim();
+        const email = String(formData.get('email') || '').trim();
+        const profileType = String(formData.get('profile_type') || 'engineering');
+        const briefingTime = String(formData.get('briefing_time') || '07:00');
+        const timezone = String(formData.get('timezone') || 'America/New_York');
+
+        setError('name-error', name ? '' : 'Full name is required.');
+        setError('email-error', email ? '' : 'Email is required.');
+        if (!name || !email) return;
+
+        setLoading(button, true, '...');
+        try {
+          const data = await apiFetch('/users', {
+            method: 'POST',
+            body: JSON.stringify({
+              name,
+              email,
+              profile_type: profileType,
+              briefing_time: briefingTime,
+              timezone
+            })
+          });
+          saveUser({
+            user_id: data.user_id,
+            management_token: data.management_token,
+            name,
+            email,
+            profile_type: profileType,
+            briefing_time: briefingTime,
+            timezone,
+            last_briefing: null
+          });
+          showScreen('resume');
+        } catch (error) {
+          setError('onboarding-error', error.message);
+        } finally {
+          setLoading(button, false);
+        }
+      });
+    }
+
+    function setupResume() {
+      document.querySelectorAll('[data-tab]').forEach((button) => {
+        button.addEventListener('click', () => switchResumeTab(button.dataset.tab));
+      });
+
+      const textArea = document.getElementById('resume-text');
+      const saveButton = document.getElementById('save-resume-text');
+      textArea.addEventListener('input', () => {
+        const count = wordCount(textArea.value);
+        document.getElementById('resume-word-count').textContent = `${count} words`;
+        saveButton.disabled = count < 100;
+      });
+
+      document.getElementById('upload-resume').addEventListener('click', uploadResumePdf);
+      saveButton.addEventListener('click', saveResumeText);
+    }
+
+    function switchResumeTab(tabName) {
+      document.querySelectorAll('[data-tab]').forEach((button) => {
+        button.classList.toggle('is-active', button.dataset.tab === tabName);
+      });
+      document.getElementById('resume-upload-panel').classList.toggle('is-active', tabName === 'upload');
+      document.getElementById('resume-paste-panel').classList.toggle('is-active', tabName === 'paste');
+    }
+
+    async function uploadResumePdf() {
+      const button = document.getElementById('upload-resume');
+      const fileInput = document.getElementById('resume-file');
+      const file = fileInput.files[0];
+      setError('resume-upload-error', '');
+      renderSuccess('upload-success', '');
+
+      if (!file) {
+        setError('resume-upload-error', 'Choose a PDF file first.');
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setError('resume-upload-error', 'File too large. Max 5MB.');
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append('resume', file);
+      setLoading(button, true, '...');
+      try {
+        const data = await apiFetch(`/users/${user.user_id}/resume/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        renderSuccess('upload-success', `
+          <p class="success">✓ Resume uploaded (${data.extracted_word_count || 0} words)</p>
+          <div class="preview mono">${escapeHtml(data.resume_preview || '')}</div>
+        `);
+      } catch (error) {
+        setError('resume-upload-error', error.message);
+        if (/scan|text|extract|pdf/i.test(error.message)) {
+          switchResumeTab('paste');
+          setError('resume-text-error', `${error.message} Paste your resume text below.`);
+        }
+      } finally {
+        setLoading(button, false);
+      }
+    }
+
+    async function saveResumeText() {
+      const button = document.getElementById('save-resume-text');
+      const resumeText = document.getElementById('resume-text').value;
+      const count = wordCount(resumeText);
+      setError('resume-text-error', '');
+      renderSuccess('text-success', '');
+      if (count < 100) {
+        setError('resume-text-error', 'Resume must be at least 100 words.');
+        return;
+      }
+
+      setLoading(button, true, '...');
+      try {
+        const data = await apiFetch(`/users/${user.user_id}/resume/text`, {
+          method: 'POST',
+          body: JSON.stringify({ resume_text: resumeText })
+        });
+        renderSuccess('text-success', `<p class="success">✓ Resume saved (${data.word_count || count} words)</p>`);
+      } catch (error) {
+        setError('resume-text-error', error.message);
+      } finally {
+        setLoading(button, false);
+      }
+    }
+
+    function initializePreferences() {
+      if (!companies.length) {
+        companies = (user && user.target_companies && user.target_companies.length)
+          ? user.target_companies.map((company) => typeof company === 'string' ? company : company.name).filter(Boolean)
+          : [...DEFAULT_COMPANIES[(user && user.profile_type) || 'engineering']];
+      }
+      document.getElementById('keywords').value = user && user.keywords
+        ? user.keywords
+        : DEFAULT_KEYWORDS[(user && user.profile_type) || 'engineering'];
+      document.getElementById('min-salary').value = user && user.min_salary ? user.min_salary : '';
+      document.getElementById('remote-only').checked = Boolean(user && user.remote_only);
+      renderCompanyTags();
+    }
+
+    function setupPreferences() {
+      document.getElementById('add-company').addEventListener('click', addCompany);
+      document.getElementById('company-input').addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          addCompany();
+        }
+      });
+      document.getElementById('save-preferences').addEventListener('click', savePreferences);
+    }
+
+    function addCompany() {
+      const input = document.getElementById('company-input');
+      const value = input.value.trim();
+      if (!value) return;
+      if (!companies.some((company) => company.toLowerCase() === value.toLowerCase())) {
+        companies.push(value);
+      }
+      input.value = '';
+      renderCompanyTags();
+    }
+
+    function renderCompanyTags() {
+      const target = document.getElementById('company-tags');
+      target.innerHTML = companies.map((company, index) => `
+        <span class="tag">
+          <span>${escapeHtml(company)}</span>
+          <button type="button" aria-label="Remove ${escapeHtml(company)}" data-remove-company="${index}">×</button>
+        </span>
+      `).join('');
+      target.querySelectorAll('[data-remove-company]').forEach((button) => {
+        button.addEventListener('click', () => {
+          companies.splice(Number(button.dataset.removeCompany), 1);
+          renderCompanyTags();
+        });
+      });
+    }
+
+    async function savePreferences() {
+      const button = document.getElementById('save-preferences');
+      const minSalaryValue = document.getElementById('min-salary').value;
+      const payload = {
+        target_companies: companies.map((name) => ({ name })),
+        min_salary: minSalaryValue ? Number(minSalaryValue) : null,
+        remote_only: document.getElementById('remote-only').checked,
+        keywords: document.getElementById('keywords').value.trim()
+      };
+      setError('preferences-error', '');
+      renderSuccess('preferences-success', '');
+      setLoading(button, true, '...');
+      try {
+        await apiFetch(`/users/${user.user_id}`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+        saveUser(payload);
+        renderSuccess('preferences-success', '<p class="success">✓ Preferences saved</p>');
+      } catch (error) {
+        setError('preferences-error', error.message);
+      } finally {
+        setLoading(button, false);
+      }
+    }
+
+    function renderWeights() {
+      const list = document.getElementById('weights-list');
+      list.innerHTML = WEIGHTS.map(([key, label, fallback]) => {
+        const value = user && typeof user[key] === 'number' ? Math.round(user[key] * 100) : fallback;
+        return `
+          <div class="weight-row">
+            <div class="weight-head">
+              <label for="${key}">${label}</label>
+              <strong id="${key}-value">${value}%</strong>
+            </div>
+            <input id="${key}" data-weight="${key}" type="range" min="0" max="100" step="5" value="${value}">
+          </div>
+        `;
+      }).join('');
+      list.querySelectorAll('[data-weight]').forEach((input) => {
+        input.addEventListener('input', updateWeightTotal);
+      });
+      updateWeightTotal();
+    }
+
+    function updateWeightTotal() {
+      let total = 0;
+      document.querySelectorAll('[data-weight]').forEach((input) => {
+        const value = Number(input.value);
+        total += value;
+        document.getElementById(`${input.dataset.weight}-value`).textContent = `${value}%`;
+      });
+      const totalElement = document.getElementById('weights-total');
+      const saveButton = document.getElementById('save-weights');
+      const perfect = total === 100;
+      totalElement.textContent = perfect ? 'Total: 100 / 100 - Perfect' : `Total: ${total} / 100 - Must equal 100`;
+      totalElement.classList.toggle('good', perfect);
+      totalElement.classList.toggle('bad', !perfect);
+      saveButton.disabled = !perfect;
+    }
+
+    function setupWeights() {
+      document.getElementById('save-weights').addEventListener('click', saveWeights);
+    }
+
+    async function saveWeights() {
+      const button = document.getElementById('save-weights');
+      const payload = {};
+      document.querySelectorAll('[data-weight]').forEach((input) => {
+        payload[input.dataset.weight] = Number(input.value) / 100;
+      });
+      setError('weights-error', '');
+      renderSuccess('weights-success', '');
+      setLoading(button, true, '...');
+      try {
+        await apiFetch(`/users/${user.user_id}/weights`, {
+          method: 'PATCH',
+          body: JSON.stringify(payload)
+        });
+        saveUser(payload);
+        renderSuccess('weights-success', '<p class="success">✓ Weights saved</p>');
+      } catch (error) {
+        setError('weights-error', error.message);
+      } finally {
+        setLoading(button, false);
+      }
+    }
+
+    function renderDashboard() {
+      if (!user) return;
+      const hour = new Date().getHours();
+      const daypart = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
+      document.getElementById('greeting').textContent = `Good ${daypart}, ${user.name || 'there'}`;
+      document.getElementById('last-briefing').textContent = user.last_briefing || 'Not run yet';
+      document.getElementById('next-scheduled').textContent = `${user.briefing_time || '07:00'} ${user.timezone || 'America/New_York'}`;
+      document.getElementById('status-email').textContent = user.email || '';
+    }
+
+    function setupDashboard() {
+      document.getElementById('run-briefing').addEventListener('click', runBriefing);
+      document.getElementById('reset-user').addEventListener('click', () => {
+        if (confirm('Reset this browser and start onboarding again?')) {
+          clearUser();
+        }
+      });
+    }
+
+    async function runBriefing() {
+      const button = document.getElementById('run-briefing');
+      setError('briefing-error', '');
+      document.getElementById('briefing-result').innerHTML = '';
+      document.getElementById('briefing-progress').innerHTML = '<span class="spinner"></span> Discovering jobs...';
+      setLoading(button, true, '...');
+      try {
+        const data = await apiFetch(`/briefing/run/${user.user_id}`, { method: 'POST' });
+        const today = new Date().toLocaleDateString(undefined, {
+          year: 'numeric',
+          month: 'short',
+          day: 'numeric'
+        });
+        saveUser({ last_briefing: today });
+        renderDashboard();
+        document.getElementById('briefing-result').innerHTML = `
+          <div class="stack">
+            <div class="result-flow">
+              <span>${data.jobs_found || 0} found</span>
+              <span class="muted">→</span>
+              <span>${data.jobs_after_gates || 0} after filters</span>
+              <span class="muted">→</span>
+              <span>${data.jobs_scored || 0} scored</span>
+            </div>
+            <p class="success">✉ Briefing email ${data.email_sent === false ? 'prepared for' : 'sent to'} ${escapeHtml(user.email || '')}</p>
+          </div>
+        `;
+      } catch (error) {
+        setError('briefing-error', error.message);
+      } finally {
+        document.getElementById('briefing-progress').innerHTML = '';
+        setLoading(button, false);
+      }
+    }
+
+    async function hydrateUser() {
+      if (!user || !user.user_id) return;
+      try {
+        const data = await apiFetch(`/users/${user.user_id}`);
+        saveUser({
+          name: data.name || user.name,
+          email: data.email || user.email,
+          profile_type: data.profile_type || user.profile_type,
+          keywords: data.keywords,
+          min_salary: data.min_salary,
+          remote_only: data.remote_only,
+          briefing_time: data.briefing_time || user.briefing_time,
+          timezone: data.timezone || user.timezone,
+          weight_role_match: data.weight_role_match,
+          weight_skills_match: data.weight_skills_match,
+          weight_experience_level: data.weight_experience_level,
+          weight_compensation: data.weight_compensation,
+          weight_cultural: data.weight_cultural
+        });
+      } catch {
+        // Dashboard can still render from local storage if profile hydration fails.
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#039;');
+    }
+
+    function init() {
+      applyUserChrome();
+      setupNavigation();
+      setupOnboarding();
+      setupResume();
+      setupPreferences();
+      setupWeights();
+      setupDashboard();
+      if (user && user.management_token) {
+        hydrateUser().finally(() => showScreen('dashboard'));
+      } else {
+        showScreen('onboarding');
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
