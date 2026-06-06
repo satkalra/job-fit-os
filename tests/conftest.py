@@ -1,8 +1,12 @@
+import os
+
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
-from app.database import Base, engine
-from app.main import app
+os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+
+from app.database import Base, engine  # noqa: E402
+from app.main import app  # noqa: E402
 
 
 @pytest_asyncio.fixture(autouse=True)

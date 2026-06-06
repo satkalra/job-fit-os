@@ -11,6 +11,15 @@ logger = logging.getLogger(__name__)
 
 
 def build_resume_docx(resume: RewrittenResume, name: str, contact: str = "") -> bytes:
+    logger.debug(
+        "build_resume_docx start name_present=%s contact_present=%s jobs=%s projects=%s skills=%s education=%s",
+        bool(name),
+        bool(contact),
+        len(resume.jobs),
+        len(resume.projects),
+        len(resume.skills),
+        len(resume.education),
+    )
     doc = Document()
 
     for section in doc.sections:
@@ -57,7 +66,9 @@ def build_resume_docx(resume: RewrittenResume, name: str, contact: str = "") -> 
 
     buf = io.BytesIO()
     doc.save(buf)
-    return buf.getvalue()
+    result = buf.getvalue()
+    logger.debug("build_resume_docx complete bytes=%s", len(result))
+    return result
 
 
 def _add_section(doc: Document, title: str) -> None:

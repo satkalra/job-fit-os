@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.pipeline.rewacto import _default_plan, rewacto_rewrite
+from app.schemas.resume import RewriteResult
 from app.schemas.job import ScoredJob
 
 
@@ -26,35 +27,75 @@ def test_default_plan_has_four_waves():
     assert all("tasks" in wave for wave in plan)
 
 
+def _make_openai_text_resp(text: str) -> MagicMock:
+    msg = MagicMock()
+    msg.content = text
+    msg.tool_calls = None
+    resp = MagicMock()
+    resp.choices = [MagicMock(message=msg)]
+    return resp
+
+
+def _make_openai_tool_resp(tool_input: dict) -> MagicMock:
+    import json
+    fn = MagicMock()
+    fn.arguments = json.dumps(tool_input)
+    tc = MagicMock()
+    tc.function = fn
+    msg = MagicMock()
+    msg.tool_calls = [tc]
+    resp = MagicMock()
+    resp.choices = [MagicMock(message=msg)]
+    return resp
+
+
 @pytest.mark.asyncio
-async def test_rewacto_rewrite_returns_string():
-    mock_haiku_resp = MagicMock()
-    mock_haiku_resp.content = [MagicMock(text='{"result": "test output", "verified": true, "rejectWaves": []}')]
-    mock_sonnet_resp = MagicMock()
-    mock_sonnet_resp.content = [
-        MagicMock(
-            text='{"verified": true, "rejectWaves": [], "finalSummary": "AI Engineer with ML expertise.", "finalBullets": ["Built RAG pipeline"], "finalSkills": ["Python", "LLMs"], "gaps": []}'
-        )
-    ]
-    with patch("app.pipeline.rewacto._anthropic") as mock_ant:
-        mock_ant.messages.create = AsyncMock(
+async def test_rewacto_rewrite_returns_result():
+    wave_resp = _make_openai_text_resp('{"result": "test output"}')
+    verifier_resp = _make_openai_tool_resp({
+        "summary": "AI Engineer with ML expertise.",
+        "jobs": [
+            {
+                "title": "Software Engineer",
+                "company": "Acme",
+                "location": "Remote",
+                "dates": "2021 - Present",
+                "bullets": ["Built RAG pipeline"],
+            }
+        ],
+        "projects": [],
+        "skills": ["Python", "LLMs"],
+        "education": [],
+        "gaps": [],
+    })
+    with patch("app.pipeline.rewacto._openai_client") as mock_oai:
+        mock_oai.chat.completions.create = AsyncMock(
             side_effect=[
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_haiku_resp,
-                mock_sonnet_resp,
-                mock_haiku_resp,
+                wave_resp,  # wave 1 x3
+                wave_resp,
+                wave_resp,
+                wave_resp,  # wave 2 x3
+                wave_resp,
+                wave_resp,
+                wave_resp,  # wave 3 workers (1 job + summary + skills)
+                wave_resp,
+                wave_resp,
+                verifier_resp,  # wave 4 verifier
             ]
         )
         result = await rewacto_rewrite(
-            "Python engineer with 5 years experience in ML and LLMs. Built RAG systems. " * 20,
+            """Jane Doe
+jane@example.com
+
+Experience
+Software Engineer | Acme | Remote | 2021 - Present
+- Built RAG systems.
+
+Skills
+Python, LLMs
+""",
             make_job(),
         )
-    assert isinstance(result, str)
-    assert len(result) > 50
+    assert isinstance(result, RewriteResult)
+    assert "Software Engineer" in result.markdown
+    assert len(result.docx_bytes) > 100

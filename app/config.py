@@ -14,6 +14,8 @@ class Settings(BaseSettings):
     JWT_EXPIRY_DAYS: int = 7
     BASE_URL: str = "http://localhost:8000"
     ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "DEBUG"
+    LOG_COLOR: str = "auto"
 
 
 settings = Settings()

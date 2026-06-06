@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import uuid
 
 from anthropic import AsyncAnthropic
@@ -11,6 +12,7 @@ from app.utils.scoring import gate_filter, keyword_overlap_score
 from app.utils.token import generate_rewrite_token
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY or "not-set")
+logger = logging.getLogger(__name__)
 _SEVERITY_PENALTY = {"low": 2, "med": 5, "high": 15}
 
 _SCORE_TOOL = {
@@ -56,6 +58,7 @@ def _validate_weights(profile: UserProfile) -> None:
         + profile.weight_compensation
         + profile.weight_cultural
     )
+    logger.debug("validate_weights user_id=%s total=%.4f", getattr(profile, "user_id", None), total)
     if abs(total - 1.0) > 0.05:
         raise ValueError(f"Profile weights must sum to 1.0, got {total:.4f}")
 
@@ -107,6 +110,7 @@ def _location_boost(job: RawJob, profile: UserProfile) -> float:
 
 
 async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> ScoredJob:
+    logger.info("score tool_call=anthropic model=claude-sonnet-4-6 company=%s title=%s source=%s", job.company, job.title, job.source)
     prompt = (
         f"You are a job-fit evaluator. Score this job for the candidate.\n\n"
         f"RESUME:\n{resume[:3000]}\n\n"
@@ -124,14 +128,16 @@ async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> Scor
     # tool_choice forces the first block to be a tool_use block; .input is already a dict
     data = response.content[0].input
     weighted = _compute_weighted_score(data, profile)
-    weighted += _company_boost(job, profile)
-    weighted += _location_boost(job, profile)
+    company_boost = _company_boost(job, profile)
+    location_boost = _location_boost(job, profile)
+    weighted += company_boost
+    weighted += location_boost
     weighted = min(weighted, 100.0)
     final_score = max(0, int(round(_apply_red_flag_penalties(weighted, data.get("redFlags", [])))))
     job_id = uuid.uuid4()
     user_id = getattr(profile, "user_id", None)
     token = generate_rewrite_token(user_id, job_id) if user_id else None
-    return ScoredJob(
+    result = ScoredJob(
         **job.model_dump(),
         global_score=final_score,
         verdict=_score_to_verdict(final_score),
@@ -147,17 +153,71 @@ async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> Scor
         summary=data.get("summary", ""),
         rewrite_token=token,
     )
+    logger.info(
+        "score status=job_complete company=%s title=%s weighted=%.2f final=%s verdict=%s flags=%s",
+        job.company,
+        job.title,
+        weighted,
+        final_score,
+        result.verdict,
+        len(result.red_flags),
+    )
+    logger.debug("score job_adjustments company_boost=%.1f location_boost=%.1f", company_boost, location_boost)
+    return result
 
 
-async def score_jobs(jobs: list[RawJob], profile: UserProfile, resume: str) -> list[ScoredJob]:
+async def _run_score_pipeline(
+    jobs: list[RawJob], profile: UserProfile, resume: str
+) -> tuple[list[ScoredJob], dict]:
+    """Core pipeline — returns (results, debug_counts)."""
     _validate_weights(profile)
-    gated = gate_filter(jobs, profile.seniority, profile.min_salary)
+    gated = gate_filter(
+        jobs,
+        profile.seniority,
+        profile.min_salary,
+        preferred_locations=profile.preferred_locations,
+        countries=profile.countries,
+        needs_sponsorship=bool(profile.needs_sponsorship),
+    )
+    logger.info("score status=gated before=%s after=%s", len(jobs), len(gated))
     keyword_filtered = [
         job
         for job in gated
         if keyword_overlap_score(resume, f"{job.description or ''} {job.title or ''}") >= 0.08
     ]
+    logger.info(
+        "score status=keyword_filtered before=%s after=%s scoring_limit=%s",
+        len(gated), len(keyword_filtered), min(len(keyword_filtered), 10),
+    )
+    keyword_filtered.sort(
+        key=lambda job: keyword_overlap_score(resume, f"{job.description or ''} {job.title or ''}"),
+        reverse=True,
+    )
     scored = await asyncio.gather(*[_score_one_job(job, profile, resume) for job in keyword_filtered[:10]])
     results = [job for job in scored if job.verdict != "skip"]
     results.sort(key=lambda job: job.global_score, reverse=True)
+    debug = {
+        "discovered": len(jobs),
+        "after_gates": len(gated),
+        "after_keyword": len(keyword_filtered),
+        "after_llm_score": len(scored),
+        "returned": len(results),
+    }
+    return results, debug
+
+
+async def score_jobs(jobs: list[RawJob], profile: UserProfile, resume: str) -> list[ScoredJob]:
+    logger.info("score status=start user_id=%s jobs=%s", getattr(profile, "user_id", None), len(jobs))
+    results, debug = await _run_score_pipeline(jobs, profile, resume)
+    logger.info("score status=complete user_id=%s %s", getattr(profile, "user_id", None), debug)
     return results
+
+
+async def score_jobs_debug(
+    jobs: list[RawJob], profile: UserProfile, resume: str
+) -> tuple[list[ScoredJob], dict]:
+    """Like score_jobs but also returns pipeline stage counts for dev/debug endpoints."""
+    logger.info("score status=start user_id=%s jobs=%s", getattr(profile, "user_id", None), len(jobs))
+    results, debug = await _run_score_pipeline(jobs, profile, resume)
+    logger.info("score status=complete user_id=%s %s", getattr(profile, "user_id", None), debug)
+    return results, debug

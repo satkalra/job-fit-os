@@ -15,16 +15,12 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "user_profiles",
-        sa.Column("preferred_locations", postgresql.ARRAY(sa.Text()), nullable=True),
-    )
-    op.drop_column("user_profiles", "remote_only")
+    op.execute("ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS preferred_locations TEXT[]")
+    op.execute("ALTER TABLE user_profiles DROP COLUMN IF EXISTS remote_only")
 
 
 def downgrade() -> None:
-    op.add_column(
-        "user_profiles",
-        sa.Column("remote_only", sa.Boolean(), server_default="false", nullable=False),
+    op.execute(
+        "ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS remote_only BOOLEAN NOT NULL DEFAULT false"
     )
-    op.drop_column("user_profiles", "preferred_locations")
+    op.execute("ALTER TABLE user_profiles DROP COLUMN IF EXISTS preferred_locations")

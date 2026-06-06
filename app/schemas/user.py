@@ -14,6 +14,8 @@ class UserCreate(BaseModel):
     min_salary: int | None = None
     target_companies: list[dict[str, Any]] | None = None
     preferred_locations: list[str] | None = None
+    countries: list[str] | None = None
+    needs_sponsorship: bool = False
     briefing_time: str = "07:00"
     timezone: str = "America/New_York"
 
@@ -28,6 +30,8 @@ class UserOut(BaseModel):
     seniority: str | None
     min_salary: int | None
     preferred_locations: list[str] | None
+    countries: list[str] | None
+    needs_sponsorship: bool
     briefing_time: str
     timezone: str
     weight_role_match: float
@@ -46,6 +50,8 @@ class ProfilePatch(BaseModel):
     min_salary: int | None = None
     target_companies: list[dict[str, Any]] | None = None
     preferred_locations: list[str] | None = None
+    countries: list[str] | None = None
+    needs_sponsorship: bool | None = None
     briefing_time: str | None = None
     timezone: str | None = None
 
