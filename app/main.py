@@ -43,7 +43,9 @@ app = FastAPI(title="JobFit OS", lifespan=lifespan)
 app.include_router(users.router)
 app.include_router(briefing_router)
 app.include_router(rewrite_router)
-app.include_router(dev_router)
+if settings.ENVIRONMENT != "production":
+    app.include_router(dev_router)
+    logger.info("dev router mounted (environment=%s)", settings.ENVIRONMENT)
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

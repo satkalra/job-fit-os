@@ -27,6 +27,10 @@ services:
         value: https://jobfit-os.onrender.com
       - key: ENVIRONMENT
         value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: SIGNUP_TOKEN
+        sync: false
 
 databases:
   - name: jobfit-os-db

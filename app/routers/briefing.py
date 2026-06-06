@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,14 +12,21 @@ from app.models.user import User, UserProfile
 from app.pipeline.discover import discover_jobs
 from app.pipeline.score import score_jobs_debug
 from app.schemas.job import BriefingRunResult
+from app.routers.users import _verify_management_token
 from app.services.email import send_briefing_email
+
 router = APIRouter(prefix="/briefing", tags=["briefing"])
 logger = logging.getLogger(__name__)
 
 
 @router.post("/run/{user_id}", response_model=BriefingRunResult)
-async def run_briefing(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def run_briefing(
+    user_id: uuid.UUID,
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+):
     logger.info("manual briefing requested user_id=%s", user_id)
+    _verify_management_token(authorization.removeprefix("Bearer "), user_id)
     row = (
         await db.execute(
             select(User, UserProfile)

@@ -1,3 +1,4 @@
+import html
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -48,7 +49,7 @@ async def rewrite_from_token(token: str):
             logger.info("rewrite already_sent user_id=%s job_id=%s sent_at=%s", user_id, job_row.id, job_row.rewrite_sent_at)
             return HTMLResponse(
                 f"""<html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:40px;">
-<h2>Already sent</h2><p>Your tailored resume for <strong>{job_row.title} at {job_row.company}</strong> was already sent to {user.email}.</p>
+<h2>Already sent</h2><p>Your tailored resume for <strong>{html.escape(job_row.title or '')} at {html.escape(job_row.company or '')}</strong> was already sent to {html.escape(user.email)}.</p>
 </body></html>"""
             )
         if not profile.resume_text:
@@ -80,6 +81,6 @@ async def rewrite_from_token(token: str):
     return HTMLResponse(
         f"""<html><body style="font-family:sans-serif;max-width:600px;margin:auto;padding:40px;">
 <h2>Your tailored resume is on its way</h2>
-<p>We've sent your Rewacto-tailored resume for <strong>{job.title} at {job.company}</strong> to <strong>{user.email}</strong>.</p>
+<p>We've sent your tailored resume for <strong>{html.escape(job.title)} at {html.escape(job.company)}</strong> to <strong>{html.escape(user.email)}</strong>.</p>
 </body></html>"""
     )

@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "DEBUG"
     LOG_COLOR: str = "auto"
+    SIGNUP_TOKEN: str = ""
 
 
 settings = Settings()

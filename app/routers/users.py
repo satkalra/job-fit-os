@@ -36,7 +36,15 @@ def _verify_management_token(token: str, user_id: uuid.UUID | None = None) -> st
 
 
 @router.post("")
-async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
+async def create_user(
+    body: UserCreate,
+    x_signup_token: str | None = Header(default=None),
+    db: AsyncSession = Depends(get_db),
+):
+    if settings.SIGNUP_TOKEN:
+        if not x_signup_token or x_signup_token != settings.SIGNUP_TOKEN:
+            logger.warning("create_user rejected invalid or missing signup token")
+            raise HTTPException(403, "Invalid or missing signup token")
     logger.debug("create_user requested email=%s profile_type=%s", body.email, body.profile_type)
     existing = await db.execute(select(User).where(User.email == body.email))
     if existing.scalar_one_or_none():
@@ -72,8 +80,13 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{user_id}")
-async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_user(
+    user_id: uuid.UUID,
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+):
     logger.debug("get_user requested user_id=%s", user_id)
+    _verify_management_token(authorization.removeprefix("Bearer "), user_id)
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
