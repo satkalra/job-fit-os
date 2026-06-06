@@ -8,7 +8,8 @@ from app.logging_config import redact_url
 
 logger = logging.getLogger(__name__)
 
-engine = create_async_engine(settings.DATABASE_URL, echo=False)
+_db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://", 1)
+engine = create_async_engine(_db_url, echo=False)
 AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 logger.debug("database engine configured url=%s", redact_url(settings.DATABASE_URL))
 
