@@ -54,6 +54,11 @@ async def root():
     return FileResponse(STATIC_DIR / "index.html")
 
 
+@app.get("/signup")
+async def signup_page():
+    return FileResponse(STATIC_DIR / "index.html")
+
+
 @app.get("/health")
 async def health():
     status = "running" if (_scheduler and _scheduler.running) else "not_started"

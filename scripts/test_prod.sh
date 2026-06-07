@@ -97,7 +97,26 @@ else
   fail "Scheduler not running (got: $SCHEDULER)"
 fi
 
-# ── 6. Signup token enforcement ───────────────────────────────────────────────
+# ── 6. Invite link flow ──────────────────────────────────────────────────────
+info "--- Invite link ---"
+STATUS=$(get_status "$BASE_URL/signup?token=$SIGNUP_TOKEN")
+check_status "GET /signup?token=... (serves HTML)" 200 "$STATUS"
+
+CONTENT_TYPE=$(curl -s -o /dev/null -w "%{content_type}" "$BASE_URL/signup?token=$SIGNUP_TOKEN")
+if echo "$CONTENT_TYPE" | grep -q "text/html"; then
+  pass "GET /signup returns text/html"
+else
+  fail "GET /signup wrong content-type: $CONTENT_TYPE"
+fi
+
+TOKEN_IN_PAGE=$(curl -s "$BASE_URL/signup?token=$SIGNUP_TOKEN" | grep -c "SIGNUP_TOKEN" || true)
+if [ "$TOKEN_IN_PAGE" -gt 0 ]; then
+  pass "Frontend JS has SIGNUP_TOKEN variable"
+else
+  fail "SIGNUP_TOKEN variable not found in page JS"
+fi
+
+# ── 7. Signup token enforcement ───────────────────────────────────────────────
 info "--- Signup token enforcement ---"
 STATUS=$(get_status -X POST "$BASE_URL/users" \
   -H "Content-Type: application/json" \
@@ -110,7 +129,7 @@ STATUS=$(get_status -X POST "$BASE_URL/users" \
   -d '{"email":"blocked@test.com","name":"Blocked","profile_type":"engineering","domains":["AI"],"seniority":"senior","briefing_time":"08:00","timezone":"UTC"}')
 check_status "POST /users (wrong token → 403)" 403 "$STATUS"
 
-# ── 7. Create user ───────────────────────────────────────────────────────────
+# ── 8. Create user ───────────────────────────────────────────────────────────
 info "--- User lifecycle ---"
 SIGNUP_RESP=$(curl -s -X POST "$BASE_URL/users" \
   -H "Content-Type: application/json" \

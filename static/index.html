@@ -702,6 +702,7 @@
   <script>
     const BASE_URL = '';
     const STORAGE_KEY = 'jobfit_user';
+    const SIGNUP_TOKEN = new URLSearchParams(window.location.search).get('token') || '';
     const DEFAULT_ACCENT = '#00C8FF';
     const ACCENTS = {
       engineering: '#00C8FF',
@@ -862,8 +863,10 @@
 
         setLoading(button, true, '...');
         try {
+          const signupHeaders = SIGNUP_TOKEN ? { 'X-Signup-Token': SIGNUP_TOKEN } : {};
           const data = await apiFetch('/users', {
             method: 'POST',
+            headers: signupHeaders,
             body: JSON.stringify({
               name,
               email,
