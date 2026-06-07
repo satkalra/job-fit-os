@@ -12,6 +12,7 @@ from app.models.user import User, UserProfile
 
 scheduler = AsyncIOScheduler()
 logger = logging.getLogger(__name__)
+_in_progress: set[str] = set()
 
 
 def is_user_due(profile: UserProfile, now_utc: datetime) -> bool:
@@ -35,40 +36,48 @@ async def _run_briefing_for_user(user: User, profile: UserProfile) -> None:
     if not profile.resume_text:
         logger.info("scheduled briefing skipped missing_resume user_id=%s", user.id)
         return
-    logger.info("scheduled briefing start user_id=%s email=%s", user.id, user.email)
-    jobs = await discover_jobs(profile)
-    logger.debug("scheduled briefing discovered user_id=%s jobs=%s", user.id, len(jobs))
-    scored = await score_jobs(jobs, profile, profile.resume_text)
-    logger.debug("scheduled briefing scored user_id=%s jobs=%s", user.id, len(scored))
-    async with AsyncSessionLocal() as db:
-        for job in scored:
-            db.add(
-                JobResult(
-                    user_id=user.id,
-                    run_date=date.today(),
-                    title=job.title,
-                    company=job.company,
-                    location=job.location,
-                    posted_date=job.posted_date,
-                    salary=job.salary,
-                    description=job.description,
-                    requirements=job.requirements,
-                    tags=job.tags,
-                    url=job.url,
-                    source=job.source,
-                    global_score=job.global_score,
-                    verdict=job.verdict,
-                    scores=job.scores,
-                    red_flags=job.red_flags,
-                    citations=job.citations,
-                    summary=job.summary,
-                    rewrite_token=job.rewrite_token,
+    uid = str(user.id)
+    if uid in _in_progress:
+        logger.info("scheduled briefing skipped already_in_progress user_id=%s", user.id)
+        return
+    _in_progress.add(uid)
+    try:
+        logger.info("scheduled briefing start user_id=%s email=%s", user.id, user.email)
+        jobs = await discover_jobs(profile)
+        logger.debug("scheduled briefing discovered user_id=%s jobs=%s", user.id, len(jobs))
+        scored = await score_jobs(jobs, profile, profile.resume_text)
+        logger.debug("scheduled briefing scored user_id=%s jobs=%s", user.id, len(scored))
+        async with AsyncSessionLocal() as db:
+            for job in scored:
+                db.add(
+                    JobResult(
+                        user_id=user.id,
+                        run_date=date.today(),
+                        title=job.title,
+                        company=job.company,
+                        location=job.location,
+                        posted_date=job.posted_date,
+                        salary=job.salary,
+                        description=job.description,
+                        requirements=job.requirements,
+                        tags=job.tags,
+                        url=job.url,
+                        source=job.source,
+                        global_score=job.global_score,
+                        verdict=job.verdict,
+                        scores=job.scores,
+                        red_flags=job.red_flags,
+                        citations=job.citations,
+                        summary=job.summary,
+                        rewrite_token=job.rewrite_token,
+                    )
                 )
-            )
-        await db.commit()
-    logger.info("scheduled briefing persisted user_id=%s jobs=%s", user.id, len(scored))
-    await send_briefing_email(user, scored)
-    logger.info("scheduled briefing complete user_id=%s", user.id)
+            await db.commit()
+        logger.info("scheduled briefing persisted user_id=%s jobs=%s", user.id, len(scored))
+        await send_briefing_email(user, scored)
+        logger.info("scheduled briefing complete user_id=%s", user.id)
+    finally:
+        _in_progress.discard(uid)
 
 
 async def check_and_run_due_briefings() -> None:

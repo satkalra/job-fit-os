@@ -14,6 +14,7 @@ from app.pipeline.score import score_jobs_debug
 from app.schemas.job import BriefingRunResult
 from app.routers.users import _verify_management_token
 from app.services.email import send_briefing_email
+from app.services.scheduler import _in_progress
 
 router = APIRouter(prefix="/briefing", tags=["briefing"])
 logger = logging.getLogger(__name__)
@@ -42,47 +43,63 @@ async def run_briefing(
         logger.info("manual briefing missing_resume user_id=%s", user_id)
         raise HTTPException(422, "User has no resume. Upload via /resume/upload or /resume/text first.")
 
-    logger.info(
-        "briefing profile user_id=%s seniority=%s locations=%s countries=%s sponsorship=%s targets=%s",
-        user_id, profile.seniority, profile.preferred_locations, profile.countries,
-        profile.needs_sponsorship, len(profile.target_companies or []),
-    )
-    jobs = await discover_jobs(profile)
-    logger.info("briefing status=discovered user_id=%s jobs=%s", user_id, len(jobs))
-    scored, pipeline = await score_jobs_debug(jobs, profile, profile.resume_text)
-    logger.info("briefing status=pipeline user_id=%s %s", user_id, pipeline)
-    logger.info("briefing status=scored user_id=%s jobs=%s", user_id, len(scored))
-    for job in scored:
-        db.add(
-            JobResult(
-                user_id=user.id,
-                run_date=date.today(),
-                title=job.title,
-                company=job.company,
-                location=job.location,
-                posted_date=job.posted_date,
-                salary=job.salary,
-                description=job.description,
-                requirements=job.requirements,
-                tags=job.tags,
-                url=job.url,
-                source=job.source,
-                global_score=job.global_score,
-                verdict=job.verdict,
-                scores=job.scores,
-                red_flags=job.red_flags,
-                citations=job.citations,
-                summary=job.summary,
-                rewrite_token=job.rewrite_token,
-            )
+    uid = str(user_id)
+    already_ran_today = (
+        await db.execute(
+            select(JobResult).where(JobResult.user_id == user_id, JobResult.run_date == date.today())
         )
-    await db.commit()
-    logger.info("manual briefing persisted jobs=%s user_id=%s", len(scored), user_id)
-    email_sent = await send_briefing_email(user, scored)
-    logger.info("manual briefing email_sent=%s user_id=%s", email_sent, user_id)
-    return BriefingRunResult(
-        jobs_found=pipeline["discovered"],
-        jobs_after_gates=pipeline["after_gates"],
-        jobs_scored=pipeline["returned"],
-        email_sent=email_sent,
-    )
+    ).first()
+    if already_ran_today:
+        logger.info("manual briefing skipped already_ran_today user_id=%s", user_id)
+        raise HTTPException(409, "Briefing already ran today for this user.")
+    if uid in _in_progress:
+        logger.info("manual briefing skipped already_in_progress user_id=%s", user_id)
+        raise HTTPException(409, "Briefing is already running for this user.")
+    _in_progress.add(uid)
+    try:
+        logger.info(
+            "briefing profile user_id=%s seniority=%s locations=%s countries=%s sponsorship=%s targets=%s",
+            user_id, profile.seniority, profile.preferred_locations, profile.countries,
+            profile.needs_sponsorship, len(profile.target_companies or []),
+        )
+        jobs = await discover_jobs(profile)
+        logger.info("briefing status=discovered user_id=%s jobs=%s", user_id, len(jobs))
+        scored, pipeline = await score_jobs_debug(jobs, profile, profile.resume_text)
+        logger.info("briefing status=pipeline user_id=%s %s", user_id, pipeline)
+        logger.info("briefing status=scored user_id=%s jobs=%s", user_id, len(scored))
+        for job in scored:
+            db.add(
+                JobResult(
+                    user_id=user.id,
+                    run_date=date.today(),
+                    title=job.title,
+                    company=job.company,
+                    location=job.location,
+                    posted_date=job.posted_date,
+                    salary=job.salary,
+                    description=job.description,
+                    requirements=job.requirements,
+                    tags=job.tags,
+                    url=job.url,
+                    source=job.source,
+                    global_score=job.global_score,
+                    verdict=job.verdict,
+                    scores=job.scores,
+                    red_flags=job.red_flags,
+                    citations=job.citations,
+                    summary=job.summary,
+                    rewrite_token=job.rewrite_token,
+                )
+            )
+        await db.commit()
+        logger.info("manual briefing persisted jobs=%s user_id=%s", len(scored), user_id)
+        email_sent = await send_briefing_email(user, scored)
+        logger.info("manual briefing email_sent=%s user_id=%s", email_sent, user_id)
+        return BriefingRunResult(
+            jobs_found=pipeline["discovered"],
+            jobs_after_gates=pipeline["after_gates"],
+            jobs_scored=pipeline["returned"],
+            email_sent=email_sent,
+        )
+    finally:
+        _in_progress.discard(uid)

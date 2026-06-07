@@ -4,6 +4,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
+os.environ["SIGNUP_TOKEN"] = ""
 
 from app.database import Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
