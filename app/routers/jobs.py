@@ -1,0 +1,110 @@
+import logging
+import uuid
+from datetime import date
+
+from fastapi import APIRouter, Header, HTTPException
+from sqlalchemy import select
+
+from app.database import AsyncSessionLocal
+from app.models.job import JobResult
+from app.models.user import User, UserProfile
+from app.pipeline.score import _score_one_job
+from app.routers.users import _verify_management_token
+from app.schemas.job import CustomJobScoreRequest, CustomJobScoreResponse, RawJob
+from app.utils.scraper import fetch_job_description
+from app.utils.token import generate_rewrite_token
+
+router = APIRouter(tags=["jobs"])
+logger = logging.getLogger(__name__)
+
+
+@router.post("/users/{user_id}/jobs/score", response_model=CustomJobScoreResponse)
+async def score_custom_job(
+    user_id: uuid.UUID,
+    body: CustomJobScoreRequest,
+    authorization: str | None = Header(default=None),
+):
+    if not authorization:
+        raise HTTPException(401, "Invalid management token")
+    _verify_management_token(authorization.removeprefix("Bearer "), user_id)
+
+    async with AsyncSessionLocal() as db:
+        row = (
+            await db.execute(
+                select(User, UserProfile)
+                .join(UserProfile, UserProfile.user_id == User.id)
+                .where(User.id == user_id)
+            )
+        ).one_or_none()
+        if not row:
+            raise HTTPException(404, "User not found.")
+
+        _, profile = row
+        if not profile.resume_text:
+            raise HTTPException(422, "No resume on file.")
+
+        url = body.url.strip() if body.url else None
+        pasted_description = body.job_description.strip() if body.job_description else None
+        description = pasted_description
+        if url:
+            scraped = await fetch_job_description(url)
+            if scraped:
+                logger.info("score_custom scrape_success url=%s chars=%s", url, len(scraped))
+                description = scraped
+            else:
+                logger.info("score_custom scrape_failed url=%s using_pasted=True", url)
+                if not pasted_description:
+                    raise HTTPException(422, "Could not fetch URL. Paste the job posting and try again.")
+
+        raw_job = RawJob(
+            title=body.title or "",
+            company=body.company or "",
+            description=description,
+            url=url,
+            source="custom",
+        )
+        scored = await _score_one_job(raw_job, profile, profile.resume_text)
+
+        job_id = uuid.uuid4()
+        token = generate_rewrite_token(user_id, job_id)
+        job_row = JobResult(
+            id=job_id,
+            user_id=user_id,
+            run_date=date.today(),
+            title=scored.title or body.title,
+            company=scored.company or body.company,
+            location=scored.location,
+            posted_date=scored.posted_date,
+            salary=scored.salary,
+            description=description,
+            requirements=scored.requirements,
+            tags=scored.tags,
+            url=url,
+            source="custom",
+            global_score=scored.global_score,
+            verdict=scored.verdict,
+            scores=scored.scores,
+            red_flags=scored.red_flags,
+            citations=scored.citations,
+            summary=scored.summary,
+            rewrite_token=token,
+        )
+        db.add(job_row)
+        await db.commit()
+        logger.info(
+            "score_custom complete user_id=%s job_id=%s score=%s verdict=%s",
+            user_id,
+            job_id,
+            scored.global_score,
+            scored.verdict,
+        )
+
+    return CustomJobScoreResponse(
+        global_score=scored.global_score,
+        verdict=scored.verdict,
+        scores=scored.scores,
+        red_flags=scored.red_flags,
+        citations=scored.citations,
+        summary=scored.summary,
+        rewrite_url=f"/rewrite?token={token}",
+    )

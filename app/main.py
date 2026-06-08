@@ -12,6 +12,7 @@ from app.logging_config import configure_logging, redact_url
 from app.routers import users
 from app.routers.briefing import router as briefing_router
 from app.routers.dev import router as dev_router
+from app.routers.jobs import router as jobs_router
 from app.routers.rewrite import router as rewrite_router
 from app.services.scheduler import setup_scheduler
 
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="JobFit OS", lifespan=lifespan)
 app.include_router(users.router)
 app.include_router(briefing_router)
+app.include_router(jobs_router)
 app.include_router(rewrite_router)
 if settings.ENVIRONMENT != "production":
     app.include_router(dev_router)

@@ -222,6 +222,7 @@
       color: #001018;
       border-radius: 10px;
       font-weight: 800;
+      text-decoration: none;
     }
 
     .button.secondary {
@@ -264,6 +265,10 @@
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
+    }
+
+    .inline-row .field {
+      flex: 1 1 220px;
     }
 
     .tab {
@@ -428,6 +433,80 @@
       gap: 12px;
     }
 
+    .score-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .score-number {
+      font-size: 44px;
+      line-height: 1;
+      font-weight: 900;
+    }
+
+    .verdict {
+      display: inline-flex;
+      align-items: center;
+      min-height: 30px;
+      padding: 0 10px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--success);
+      font-size: 13px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .breakdown-grid {
+      display: grid;
+      gap: 10px;
+    }
+
+    .breakdown-row {
+      display: block;
+    }
+
+    .meter {
+      height: 8px;
+      overflow: hidden;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+    }
+
+    .meter span {
+      display: block;
+      height: 100%;
+      width: var(--value);
+      background: var(--accent);
+    }
+
+    .red-flag-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .red-flag {
+      padding: 10px 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+
+    .red-flag strong {
+      color: var(--error);
+      text-transform: uppercase;
+      font-size: 12px;
+    }
+
     .stat {
       display: flex;
       justify-content: space-between;
@@ -499,6 +578,7 @@
       <button class="nav-link" data-nav="resume">Resume</button>
       <button class="nav-link" data-nav="preferences">Preferences</button>
       <button class="nav-link" data-nav="weights">Weights</button>
+      <button class="nav-link" data-nav="score">Score a Job</button>
       <button class="nav-link" data-nav="dashboard">Dashboard</button>
     </div>
     <div id="nav-email" class="nav-email"></div>
@@ -663,6 +743,39 @@
       </div>
     </section>
 
+    <section id="screen-score" class="screen">
+      <div class="stack">
+        <div>
+          <h2>Score a Job</h2>
+          <p class="muted">Use a job URL or paste the posting to get an immediate fit score.</p>
+        </div>
+        <form id="score-job-form" class="card form">
+          <div class="field">
+            <label for="job-url">URL</label>
+            <input id="job-url" name="url" type="url" placeholder="https://jobs.example.com/role">
+          </div>
+          <div class="inline-row">
+            <div class="field">
+              <label for="job-title">Title</label>
+              <input id="job-title" name="title" type="text" placeholder="Senior Engineer">
+            </div>
+            <div class="field">
+              <label for="job-company">Company</label>
+              <input id="job-company" name="company" type="text" placeholder="Acme Corp">
+            </div>
+          </div>
+          <div class="field">
+            <label for="job-description">Job posting</label>
+            <textarea id="job-description" name="job_description" class="mono" spellcheck="true"></textarea>
+            <div class="error" id="score-job-description-error"></div>
+          </div>
+          <div class="error" id="score-job-error"></div>
+          <button id="score-job-submit" class="button full" type="submit">Score Job</button>
+        </form>
+        <div id="score-job-result"></div>
+      </div>
+    </section>
+
     <section id="screen-dashboard" class="screen">
       <div class="stack">
         <div>
@@ -693,6 +806,7 @@
           <button class="button secondary" data-nav="resume" type="button">Resume</button>
           <button class="button secondary" data-nav="preferences" type="button">Preferences</button>
           <button class="button secondary" data-nav="weights" type="button">Weights</button>
+          <button class="button secondary" data-nav="score" type="button">Score a Job</button>
         </div>
         <button id="reset-user" class="button ghost" type="button">Reset / Re-onboard</button>
       </div>
@@ -734,6 +848,7 @@
       resume: document.getElementById('screen-resume'),
       preferences: document.getElementById('screen-preferences'),
       weights: document.getElementById('screen-weights'),
+      score: document.getElementById('screen-score'),
       dashboard: document.getElementById('screen-dashboard')
     };
 
@@ -1181,6 +1296,120 @@
       });
     }
 
+    function setupScoreJob() {
+      document.getElementById('score-job-form').addEventListener('submit', submitCustomJob);
+    }
+
+    async function submitCustomJob(event) {
+      event.preventDefault();
+      const button = document.getElementById('score-job-submit');
+      const form = event.currentTarget;
+      const formData = new FormData(form);
+      const url = nullableTrim(formData.get('url'));
+      const jobDescription = String(formData.get('job_description') || '').trim();
+      const payload = {
+        job_description: jobDescription || null,
+        url,
+        title: nullableTrim(formData.get('title')),
+        company: nullableTrim(formData.get('company'))
+      };
+
+      const hasJobInput = Boolean(url || jobDescription);
+      setError('score-job-description-error', hasJobInput ? '' : 'Add a URL or paste the job posting.');
+      setError('score-job-error', '');
+      document.getElementById('score-job-result').innerHTML = '';
+      if (!hasJobInput) return;
+
+      setLoading(button, true, 'Scoring...');
+      try {
+        const data = await apiFetch(`/users/${user.user_id}/jobs/score`, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+        renderScoreResult(data);
+      } catch (error) {
+        setError('score-job-error', error.message);
+      } finally {
+        setLoading(button, false);
+      }
+    }
+
+    function nullableTrim(value) {
+      const trimmed = String(value || '').trim();
+      return trimmed || null;
+    }
+
+    function renderScoreResult(data) {
+      const breakdown = Object.entries(data.scores || {}).map(([key, value]) => {
+        const score = Number(value) || 0;
+        const width = Math.max(0, Math.min(100, (score / 5) * 100));
+        return `
+          <div class="breakdown-row">
+            <div>
+              <div class="status-row">
+                <strong>${escapeHtml(formatScoreLabel(key))}</strong>
+                <span class="muted mono">${score}/5</span>
+              </div>
+              <div class="meter" aria-hidden="true"><span style="--value: ${width}%"></span></div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const flags = Array.isArray(data.red_flags) && data.red_flags.length
+        ? data.red_flags.map((flag) => {
+            const severity = typeof flag === 'object' && flag ? flag.severity || 'flag' : 'flag';
+            const reason = typeof flag === 'object' && flag ? flag.reason || '' : String(flag || '');
+            return `<div class="red-flag"><strong>${escapeHtml(severity)}</strong><br>${escapeHtml(reason)}</div>`;
+          }).join('')
+        : '<p class="muted">No red flags found.</p>';
+
+      const citations = Array.isArray(data.citations) && data.citations.length
+        ? `<div class="preview">${data.citations.map((item) => escapeHtml(item)).join('<br>')}</div>`
+        : '';
+
+      const rewriteLink = data.rewrite_url
+        ? `<a class="button full" href="${escapeHtml(data.rewrite_url)}">Get Tailored Resume →</a>`
+        : '';
+
+      document.getElementById('score-job-result').innerHTML = `
+        <div class="card stack">
+          <div class="score-head">
+            <div>
+              <div class="score-number">${Number(data.global_score) || 0}</div>
+              <p class="muted">Global score</p>
+            </div>
+            <span class="verdict">${escapeHtml(data.verdict || 'unscored')}</span>
+          </div>
+          <div class="stack">
+            <h3>Breakdown</h3>
+            <div class="breakdown-grid">${breakdown || '<p class="muted">No breakdown returned.</p>'}</div>
+          </div>
+          <div class="stack">
+            <h3>Summary</h3>
+            <p class="muted">${escapeHtml(data.summary || '')}</p>
+            ${citations}
+          </div>
+          <div class="stack">
+            <h3>Red flags</h3>
+            <div class="red-flag-list">${flags}</div>
+          </div>
+          ${rewriteLink}
+        </div>
+      `;
+    }
+
+    function formatScoreLabel(key) {
+      const labels = {
+        roleMatch: 'Role Match',
+        skillsMatch: 'Skills Match',
+        experienceLevel: 'Experience Level',
+        compensation: 'Compensation',
+        cultural: 'Culture / Company'
+      };
+      return labels[key] || String(key).replace(/([A-Z])/g, ' $1').replace(/^./, (char) => char.toUpperCase());
+    }
+
     async function runBriefing() {
       const button = document.getElementById('run-briefing');
       setError('briefing-error', '');
@@ -1257,6 +1486,7 @@
       setupResume();
       setupPreferences();
       setupWeights();
+      setupScoreJob();
       setupDashboard();
       if (user && user.management_token) {
         hydrateUser().finally(() => showScreen('dashboard'));
