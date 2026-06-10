@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import uuid
 
 from anthropic import AsyncAnthropic
@@ -10,6 +11,7 @@ from app.schemas.job import RawJob, ScoredJob
 from app.utils.aliases import expand_location, normalize_company
 from app.utils.scoring import gate_filter, keyword_overlap_score
 from app.utils.token import generate_rewrite_token
+from app.utils.usage import record_usage_in_new_session
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY or "not-set")
 logger = logging.getLogger(__name__)
@@ -109,6 +111,30 @@ def _location_boost(job: RawJob, profile: UserProfile) -> float:
     return 0.0
 
 
+def _select_for_scoring(jobs: list[RawJob], limit: int = 10, per_company_cap: int = 2) -> list[RawJob]:
+    if len(jobs) <= limit:
+        return jobs
+    company_counts: dict[str, int] = {}
+    selected: list[RawJob] = []
+    # First pass: respect cap strictly, preserving keyword-score order.
+    for job in jobs:
+        if len(selected) >= limit:
+            break
+        key = (job.company or "unknown").lower()
+        if company_counts.get(key, 0) < per_company_cap:
+            selected.append(job)
+            company_counts[key] = company_counts.get(key, 0) + 1
+    # Second pass: fill remaining slots from overflow (no company restriction).
+    if len(selected) < limit:
+        selected_set = {id(j) for j in selected}
+        for job in jobs:
+            if len(selected) >= limit:
+                break
+            if id(job) not in selected_set:
+                selected.append(job)
+    return selected
+
+
 async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> ScoredJob:
     logger.info("score tool_call=anthropic model=claude-sonnet-4-6 company=%s title=%s source=%s", job.company, job.title, job.source)
     prompt = (
@@ -125,6 +151,15 @@ async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> Scor
         tool_choice={"type": "tool", "name": "score_job"},
         messages=[{"role": "user", "content": prompt}],
     )
+    user_id = getattr(profile, "user_id", None)
+    if user_id:
+        await record_usage_in_new_session(
+            response=response,
+            user_id=user_id,
+            stage="score",
+            provider="anthropic",
+            model="claude-sonnet-4-6",
+        )
     # tool_choice forces the first block to be a tool_use block; .input is already a dict
     data = response.content[0].input
     weighted = _compute_weighted_score(data, profile)
@@ -135,7 +170,6 @@ async def _score_one_job(job: RawJob, profile: UserProfile, resume: str) -> Scor
     weighted = min(weighted, 100.0)
     final_score = max(0, int(round(_apply_red_flag_penalties(weighted, data.get("redFlags", [])))))
     job_id = uuid.uuid4()
-    user_id = getattr(profile, "user_id", None)
     token = generate_rewrite_token(user_id, job_id) if user_id else None
     result = ScoredJob(
         **job.model_dump(),
@@ -193,7 +227,8 @@ async def _run_score_pipeline(
         key=lambda job: keyword_overlap_score(resume, f"{job.description or ''} {job.title or ''}"),
         reverse=True,
     )
-    scored = await asyncio.gather(*[_score_one_job(job, profile, resume) for job in keyword_filtered[:10]])
+    to_score = _select_for_scoring(keyword_filtered, limit=10)
+    scored = await asyncio.gather(*[_score_one_job(job, profile, resume) for job in to_score])
     results = [job for job in scored if job.verdict != "skip"]
     results.sort(key=lambda job: job.global_score, reverse=True)
     debug = {

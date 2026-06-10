@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,6 +13,22 @@ from app.models.user import User, UserProfile
 scheduler = AsyncIOScheduler()
 logger = logging.getLogger(__name__)
 _in_progress: set[str] = set()
+
+
+async def _load_seen_hashes(user_id, db_session) -> set[str]:
+    cutoff = date.today() - timedelta(days=30)
+    rows = (
+        await db_session.execute(
+            select(JobResult.job_hash).where(
+                JobResult.user_id == user_id,
+                JobResult.run_date >= cutoff,
+                JobResult.job_hash.isnot(None),
+            )
+        )
+    ).scalars().all()
+    hashes = set(rows)
+    logger.info("scheduler seen_hashes=%s user_id=%s", len(hashes), user_id)
+    return hashes
 
 
 def is_user_due(profile: UserProfile, now_utc: datetime) -> bool:
@@ -29,7 +45,7 @@ def is_user_due(profile: UserProfile, now_utc: datetime) -> bool:
 
 
 async def _run_briefing_for_user(user: User, profile: UserProfile) -> None:
-    from app.pipeline.discover import discover_jobs
+    from app.pipeline.discover import _job_hash, discover_jobs
     from app.pipeline.score import score_jobs
     from app.services.email import send_briefing_email
 
@@ -43,7 +59,9 @@ async def _run_briefing_for_user(user: User, profile: UserProfile) -> None:
     _in_progress.add(uid)
     try:
         logger.info("scheduled briefing start user_id=%s email=%s", user.id, user.email)
-        jobs = await discover_jobs(profile)
+        async with AsyncSessionLocal() as db:
+            seen_hashes = await _load_seen_hashes(user.id, db)
+        jobs = await discover_jobs(profile, seen_hashes=seen_hashes)
         logger.debug("scheduled briefing discovered user_id=%s jobs=%s", user.id, len(jobs))
         scored = await score_jobs(jobs, profile, profile.resume_text)
         logger.debug("scheduled briefing scored user_id=%s jobs=%s", user.id, len(scored))
@@ -70,6 +88,7 @@ async def _run_briefing_for_user(user: User, profile: UserProfile) -> None:
                         citations=job.citations,
                         summary=job.summary,
                         rewrite_token=job.rewrite_token,
+                        job_hash=_job_hash(job.company or "", job.title or ""),
                     )
                 )
             await db.commit()

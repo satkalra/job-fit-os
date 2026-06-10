@@ -10,6 +10,7 @@ from app.schemas.job import ScoredJob
 from app.schemas.resume import RewriteError, RewriteResult, RewrittenResume, ResumeStructure
 from app.services.docx_builder import build_resume_docx
 from app.utils.resume_parser import parse_resume
+from app.utils.usage import record_usage_in_new_session
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,15 @@ Return ONLY a JSON object: {{"result": <your output as string or structured data
         max_completion_tokens=2000,
         messages=[{"role": "user", "content": prompt}],
     )
+    user_id = context.get("user_id")
+    if user_id:
+        await record_usage_in_new_session(
+            response=resp,
+            user_id=user_id,
+            stage="rewacto",
+            provider="openai",
+            model="gpt-5.5",
+        )
     text = (resp.choices[0].message.content or "").strip()
     try:
         result = json.loads(text[text.find("{") : text.rfind("}") + 1])
@@ -170,6 +180,7 @@ async def _verify_with_openai(
     resume_structure: ResumeStructure,
     wave_outputs: dict,
     job: ScoredJob,
+    user_id: object | None = None,
 ) -> RewrittenResume:
     if not _openai_client:
         raise RewriteError("OPENAI_API_KEY not set.", raw_output={})
@@ -225,6 +236,14 @@ Now submit the complete rewritten resume using the tool."""
         tool_choice={"type": "function", "function": {"name": "submit_rewritten_resume"}},
         messages=[{"role": "user", "content": prompt}],
     )
+    if user_id:
+        await record_usage_in_new_session(
+            response=resp,
+            user_id=user_id,
+            stage="rewacto",
+            provider="openai",
+            model="gpt-5.5",
+        )
     raw = _extract_tool_input(resp)
     try:
         result = RewrittenResume.model_validate(raw)
@@ -286,6 +305,7 @@ async def rewacto_rewrite(
         "job_title": job.title,
         "job_company": job.company,
         "job_description": job.description or "",
+        "user_id": getattr(job, "user_id", None),
         "wave_outputs": {},
     }
 
@@ -295,7 +315,7 @@ async def rewacto_rewrite(
         log(f"Wave {wave['wave']} start")
         context["wave_outputs"].update(await _run_wave(wave, context))
 
-    rewritten = await _verify_with_openai(resume, resume_structure, context["wave_outputs"], job)
+    rewritten = await _verify_with_openai(resume, resume_structure, context["wave_outputs"], job, context["user_id"])
     rewritten = _preserve_original_structure(resume_structure, rewritten)
     docx_bytes = build_resume_docx(rewritten, resume_structure.name, resume_structure.contact)
     markdown = markdown_from_rewritten(rewritten, resume_structure.name, resume_structure.contact)

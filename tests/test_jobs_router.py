@@ -1,4 +1,6 @@
 from unittest.mock import AsyncMock, patch
+import uuid
+from datetime import date
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -30,6 +32,51 @@ def _mock_scored_job() -> ScoredJob:
         summary="Strong match on backend skills.",
         rewrite_token="transient-token",
     )
+
+
+@pytest.mark.asyncio
+async def test_mark_applied_sets_status(created_user):
+    user_id, token = created_user
+
+    async with AsyncSessionLocal() as db:
+        job = JobResult(
+            user_id=uuid.UUID(user_id),
+            run_date=date.today(),
+            title="Data Analyst",
+            company="Stripe",
+            global_score=80,
+            verdict="apply",
+            scores={},
+            red_flags=[],
+            citations=[],
+            summary="good fit",
+        )
+        db.add(job)
+        await db.commit()
+        await db.refresh(job)
+        job_id = str(job.id)
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            f"/users/{user_id}/jobs/{job_id}/apply",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "applied"
+    assert data["applied_at"] is not None
+
+
+@pytest.mark.asyncio
+async def test_mark_applied_wrong_token(created_user):
+    user_id, _ = created_user
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            f"/users/{user_id}/jobs/{uuid.uuid4()}/apply",
+            headers={"Authorization": "Bearer bad-token"},
+        )
+    assert resp.status_code == 401
 
 
 async def _upload_resume(user_id: str, token: str) -> None:

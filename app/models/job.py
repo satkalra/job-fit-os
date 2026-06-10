@@ -41,6 +41,9 @@ class JobResult(Base):
     summary: Mapped[str | None] = mapped_column(Text)
     rewrite_token: Mapped[str | None] = mapped_column(Text, unique=True)
     rewrite_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, default="new", server_default="new")
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    job_hash: Mapped[str | None] = mapped_column(Text, index=True)
     created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     user: Mapped["User"] = relationship(back_populates="job_results")

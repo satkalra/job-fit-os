@@ -1,5 +1,6 @@
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import re
@@ -7,21 +8,25 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, RateLimitError
 
 from app.config import settings
 from app.models.user import UserProfile
 from app.schemas.job import RawJob
-from app.utils.aliases import ROLE_ALIASES
+from app.utils.aliases import ROLE_ALIASES, expand_role
+from app.utils.usage import record_usage_in_new_session
 
 _anthropic = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY or "not-set")
 logger = logging.getLogger(__name__)
+_REACT_SEMAPHORE = asyncio.Semaphore(1)
 
 _REGISTRY_PATH = Path(__file__).resolve().parents[1] / "data" / "company_ats_registry.json"
 _REACT_MODEL = "claude-haiku-4-5-20251001"
-_MAX_REACT_ITERATIONS = 8
+_MAX_REACT_ITERATIONS = 10
 _CONTEXT_TRIM_AT = 4
-_REACT_TIMEOUT_SECONDS = 60
+_WEB_SEARCH_MAX_USES = 3
+_KEEP_SEARCH_RESULTS_LAST_N = 1
+_REACT_TIMEOUT_SECONDS = 180
 
 
 def _dedup_jobs(jobs: list[RawJob]) -> list[RawJob]:
@@ -36,6 +41,51 @@ def _dedup_jobs(jobs: list[RawJob]) -> list[RawJob]:
             logger.debug("dedup_jobs dropped duplicate company=%s title=%s", job.company, job.title)
     logger.debug("dedup_jobs input=%s output=%s", len(jobs), len(unique))
     return unique
+
+
+def _job_hash(company: str, title: str) -> str:
+    def _norm(value: str) -> str:
+        return re.sub(r"[^\w]", "", value.lower().strip())
+
+    key = f"{_norm(company)}::{_norm(title)}"
+    return hashlib.sha256(key.encode()).hexdigest()[:16]
+
+
+def _filter_seen(jobs: list[RawJob], seen_hashes: set[str]) -> list[RawJob]:
+    if not seen_hashes:
+        return jobs
+    kept = []
+    for job in jobs:
+        job_key = _job_hash(job.company or "", job.title or "")
+        if job_key in seen_hashes:
+            logger.debug("filter_seen dropped company=%s title=%s hash=%s", job.company, job.title, job_key)
+        else:
+            kept.append(job)
+    logger.info("filter_seen before=%s after=%s", len(jobs), len(kept))
+    return kept
+
+
+def _filter_registry_by_domain(
+    registry: list[dict[str, Any]],
+    profile_domains: list[str] | None,
+) -> list[dict[str, Any]]:
+    if not profile_domains:
+        return registry
+    profile_set: set[str] = set()
+    for domain in profile_domains:
+        profile_set.add(domain.lower())
+        profile_set.update(term.lower() for term in expand_role(domain))
+        profile_set.update(token for token in re.split(r"\W+", domain.lower()) if token)
+    matched = [
+        entry
+        for entry in registry
+        if profile_set & {domain.lower() for domain in (entry.get("domains") or [])}
+    ]
+    if not matched:
+        logger.info("discover registry_domain_filter no_match domains=%s returning_all=%s", profile_domains, len(registry))
+        return registry
+    logger.info("discover registry_domain_filter matched=%s total=%s", len(matched), len(registry))
+    return matched
 
 
 async def _fetch_greenhouse(token: str, client: httpx.AsyncClient) -> list[RawJob]:
@@ -63,6 +113,9 @@ async def _fetch_greenhouse(token: str, client: httpx.AsyncClient) -> list[RawJo
     except httpx.HTTPStatusError as exc:
         logger.debug("fetch_greenhouse token=%s status=%s", token, exc.response.status_code)
         return []
+    except httpx.TimeoutException:
+        logger.debug("fetch_greenhouse timeout token=%s", token)
+        return []
     except Exception:
         logger.exception("fetch_greenhouse failed token=%s", token)
         return []
@@ -88,6 +141,9 @@ async def _fetch_lever(token: str, client: httpx.AsyncClient) -> list[RawJob]:
         return jobs
     except httpx.HTTPStatusError as exc:
         logger.debug("fetch_lever token=%s status=%s", token, exc.response.status_code)
+        return []
+    except httpx.TimeoutException:
+        logger.debug("fetch_lever timeout token=%s", token)
         return []
     except Exception:
         logger.exception("fetch_lever failed token=%s", token)
@@ -127,6 +183,9 @@ async def _fetch_ashby(token: str, client: httpx.AsyncClient) -> list[RawJob]:
     except httpx.HTTPStatusError as exc:
         logger.debug("fetch_ashby token=%s status=%s", token, exc.response.status_code)
         return []
+    except httpx.TimeoutException:
+        logger.debug("fetch_ashby timeout token=%s", token)
+        return []
     except Exception:
         logger.exception("fetch_ashby failed token=%s", token)
         return []
@@ -149,7 +208,7 @@ def _constraints_clause(profile: UserProfile, locations_str: str) -> str:
     return " ".join(parts)
 
 
-def _load_company_registry() -> list[dict[str, str]]:
+def _load_company_registry() -> list[dict[str, Any]]:
     try:
         data = json.loads(_REGISTRY_PATH.read_text())
     except FileNotFoundError:
@@ -222,7 +281,7 @@ async def _company_lookup(name: str, client: httpx.AsyncClient) -> list[RawJob]:
 
 def _react_tools() -> list[dict[str, Any]]:
     return [
-        {"type": "web_search_20250305", "name": "web_search"},
+        {"type": "web_search_20250305", "name": "web_search", "max_uses": _WEB_SEARCH_MAX_USES},
         {
             "name": "company_lookup",
             "description": "Find open jobs for one company by probing Greenhouse, Lever, and Ashby ATS boards.",
@@ -236,34 +295,48 @@ def _react_tools() -> list[dict[str, Any]]:
 
 
 def _build_react_prompt(profile: UserProfile) -> str:
-    role_terms = ", ".join(profile.domains or [])
-    if not role_terms and profile.keywords:
-        role_terms = ", ".join(k.strip() for k in (profile.keywords or "").split(",")[:3])
+    target_names = {company.get("name", "") for company in (getattr(profile, "target_companies", None) or []) if company.get("name")}
+    target_names.update(name.strip() for name in _DEFAULT_BIGTECH.split(",") if name.strip())
+    return _build_react_scout_prompt(profile, target_names)
+
+
+def _build_react_scout_prompt(profile: UserProfile, exclude_companies: set[str]) -> str:
+    role_terms = ", ".join(getattr(profile, "domains", None) or [])
+    keywords = getattr(profile, "keywords", None) or ""
+    if not role_terms and keywords:
+        role_terms = ", ".join(k.strip() for k in keywords.split(",")[:3])
     for abbr, expansions in ROLE_ALIASES.items():
         if abbr in role_terms.lower():
             role_terms += ", " + ", ".join(sorted(expansions))
 
-    pref_locations = ", ".join(profile.preferred_locations or [])
-    countries = ", ".join(profile.countries or [])
+    pref_locations = ", ".join(getattr(profile, "preferred_locations", None) or ["Remote"])
+    countries = ", ".join(getattr(profile, "countries", None) or [])
     locations_str = ", ".join(filter(None, [pref_locations, countries])) or "Remote"
-    target_names = [c.get("name", "") for c in (profile.target_companies or []) if c.get("name")]
-    exclude = ", ".join(filter(None, [", ".join(target_names), _DEFAULT_BIGTECH]))
-    constraints = _constraints_clause(profile, locations_str)
+    seniority = getattr(profile, "seniority", None) or "mid-level"
+    exclude_list = ", ".join(sorted(exclude_companies)) if exclude_companies else "none"
 
-    return f"""Find 20-30 currently open job postings for this candidate.
+    return f"""You are a company discovery agent. Your ONLY job is to find company names that are hiring.
 
-Roles/domains: {role_terms or "software engineering"}
-Keywords: {profile.keywords or role_terms}
-Hard constraints: {constraints}
-Exclude companies already covered elsewhere: {exclude}
+TARGET CANDIDATE:
+- Roles: {role_terms or "software engineering"}
+- Seniority: {seniority}
+- Location: {locations_str} (or fully remote)
 
-Use web_search to discover unknown companies and niche boards such as LinkedIn, Indeed, Wellfound, Y Combinator Work at a Startup, Otta, startup ecosystem lists, and company career pages.
-When you identify a promising company name, call company_lookup with only the company name.
-Adapt each search based on gaps in prior results. Prefer startups and mid-size companies over household-name big tech.
+INSTRUCTIONS:
+1. Use web_search to find companies actively hiring for {role_terms or "matching"} roles in {locations_str}.
+2. Search job boards, startup lists, LinkedIn hiring posts, Y Combinator, Wellfound, Otta, AngelList.
+3. For each promising company you find, immediately call company_lookup with the company name.
+4. Do NOT output job listings. Do NOT output JSON. Your text output should only be brief search reasoning.
+5. Focus on startups and mid-size companies. Skip big tech.
 
-Return discovered jobs as JSON arrays in text whenever possible, with objects shaped exactly as:
-[{{"title":"...","company":"...","location":"...","url":"...","description":"...","posted_date":null}}]
-Only include real open postings with apply URLs."""
+ALREADY COVERED - skip these: {exclude_list}
+
+Good search queries to try:
+- "{role_terms} jobs hiring {pref_locations} startup 2026"
+- "companies hiring {role_terms} {pref_locations} site:wellfound.com OR site:ycombinator.com"
+- "{role_terms} job openings {pref_locations} series B OR series C"
+
+Call company_lookup for every promising company name you discover. That is your primary output."""
 
 
 def _text_from_response(response: Any) -> str:
@@ -298,6 +371,39 @@ def _content_blocks_for_messages(content: Any) -> list[dict[str, Any]]:
                     }
                 )
     return blocks
+
+
+_SEARCH_BLOCK_TYPES = {"server_tool_use", "web_search_tool_result"}
+
+
+def _prune_search_results(messages: list[dict[str, Any]], keep_last_n: int) -> None:
+    """Drop bulky web-search blocks from older turns in place.
+
+    Server-side web search embeds ``server_tool_use`` + ``web_search_tool_result``
+    blocks (with large ``encrypted_content`` blobs) directly in the assistant
+    message, and the whole history is resent every iteration — that is the token
+    hog that trips the rate limit. We keep the search blocks for the most recent
+    ``keep_last_n`` search turns and strip them from older turns, leaving the
+    model's own reasoning text (and any company_lookup ``tool_use`` blocks, which
+    must stay to pair with their ``tool_result``) intact.
+    """
+    search_turn_indices = [
+        idx
+        for idx, message in enumerate(messages)
+        if isinstance(message.get("content"), list)
+        and any(isinstance(b, dict) and b.get("type") in _SEARCH_BLOCK_TYPES for b in message["content"])
+    ]
+    prune_indices = set(search_turn_indices[:-keep_last_n] if keep_last_n else search_turn_indices)
+    for idx in prune_indices:
+        kept = [
+            block
+            for block in messages[idx]["content"]
+            if not (isinstance(block, dict) and block.get("type") in _SEARCH_BLOCK_TYPES)
+        ]
+        # Never leave an assistant turn with empty content — the API rejects it.
+        if not kept:
+            kept = [{"type": "text", "text": "(searched; results elided)"}]
+        messages[idx]["content"] = kept
 
 
 def _coerce_jobs_from_json_text(text: str, source: str) -> list[RawJob]:
@@ -351,36 +457,54 @@ def _extract_jobs_from_results(dispatch_results: list[str]) -> list[RawJob]:
     return jobs
 
 
-def _trim_to_summary(found_jobs: list[RawJob], profile: UserProfile) -> list[dict[str, Any]]:
+def _trim_to_summary(found_jobs: list[RawJob], profile: UserProfile, exclude_companies: set[str]) -> list[dict[str, Any]]:
     companies = sorted({job.company for job in found_jobs if job.company})[:30]
-    remaining = ", ".join(profile.domains or []) or (profile.keywords or "matching roles")
+    remaining = ", ".join(getattr(profile, "domains", None) or []) or (getattr(profile, "keywords", None) or "matching roles")
     summary = (
         f"So far found {len(found_jobs)} jobs at: {', '.join(companies) or 'no companies yet'}. "
         f"Continue searching for gaps in: {remaining}."
     )
     return [
-        {"role": "user", "content": _build_react_prompt(profile)},
+        {"role": "user", "content": _build_react_scout_prompt(profile, exclude_companies)},
         {"role": "assistant", "content": [{"type": "text", "text": summary}]},
     ]
 
 
-async def _run_react_search_agent_inner(profile: UserProfile) -> list[RawJob]:
+async def _run_react_search_agent_inner(profile: UserProfile, exclude_companies: set[str]) -> list[RawJob]:
     user_id = getattr(profile, "user_id", None)
-    messages: list[dict[str, Any]] = [{"role": "user", "content": _build_react_prompt(profile)}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": _build_react_scout_prompt(profile, exclude_companies)}]
     found_jobs: list[RawJob] = []
 
     async with httpx.AsyncClient() as client:
         for iteration in range(_MAX_REACT_ITERATIONS):
             logger.info("discover status=react_iteration_start user_id=%s iteration=%s", user_id, iteration)
-            response = await _anthropic.messages.create(
-                model=_REACT_MODEL,
-                max_tokens=4000,
-                tools=_react_tools(),
-                messages=copy.deepcopy(messages),
+            _prune_search_results(messages, _KEEP_SEARCH_RESULTS_LAST_N)
+            for _attempt in range(4):
+                try:
+                    response = await _anthropic.messages.create(
+                        model=_REACT_MODEL,
+                        max_tokens=2000,
+                        tools=_react_tools(),
+                        messages=copy.deepcopy(messages),
+                    )
+                    break
+                except RateLimitError:
+                    if _attempt == 3:
+                        raise
+                    wait = 15 * (2 ** _attempt)
+                    logger.warning("discover rate_limit user_id=%s attempt=%s/%s sleeping=%ss", user_id, _attempt + 1, 4, wait)
+                    await asyncio.sleep(wait)
+            else:
+                raise RuntimeError("unreachable")
+            if user_id:
+                await record_usage_in_new_session(
+                    response=response,
+                    user_id=user_id,
+                    stage="discover",
+                    provider="anthropic",
+                    model=_REACT_MODEL,
             )
             messages.append({"role": "assistant", "content": _content_blocks_for_messages(getattr(response, "content", []))})
-
-            found_jobs.extend(_coerce_jobs_from_json_text(_text_from_response(response), "ai"))
 
             if getattr(response, "stop_reason", None) == "pause_turn":
                 logger.info("discover status=react_pause_turn user_id=%s iteration=%s", user_id, iteration)
@@ -423,17 +547,27 @@ async def _run_react_search_agent_inner(profile: UserProfile) -> list[RawJob]:
             found_jobs = _dedup_jobs(found_jobs)
 
             if iteration == _CONTEXT_TRIM_AT:
-                messages = _trim_to_summary(found_jobs, profile)
+                messages = _trim_to_summary(found_jobs, profile, exclude_companies)
 
     return found_jobs
 
 
-async def _run_react_search_agent(profile: UserProfile) -> list[RawJob]:
+async def _run_react_search_agent(
+    profile: UserProfile,
+    exclude_companies: set[str] | None = None,
+) -> list[RawJob]:
+    if not settings.ENABLE_REACT_SEARCH:
+        logger.info("discover status=search_skipped reason=react_disabled user_id=%s", getattr(profile, "user_id", None))
+        return []
     if not settings.ANTHROPIC_API_KEY:
         logger.info("discover status=search_skipped reason=missing_anthropic_api_key user_id=%s", getattr(profile, "user_id", None))
         return []
     try:
-        return await asyncio.wait_for(_run_react_search_agent_inner(profile), timeout=_REACT_TIMEOUT_SECONDS)
+        async with _REACT_SEMAPHORE:
+            return await asyncio.wait_for(
+                _run_react_search_agent_inner(profile, exclude_companies or set()),
+                timeout=_REACT_TIMEOUT_SECONDS,
+            )
     except asyncio.TimeoutError:
         logger.warning("discover status=react_timeout user_id=%s timeout=%s", getattr(profile, "user_id", None), _REACT_TIMEOUT_SECONDS)
         return []
@@ -442,33 +576,48 @@ async def _run_react_search_agent(profile: UserProfile) -> list[RawJob]:
         return []
 
 
-async def discover_jobs(profile: UserProfile) -> list[RawJob]:
-    logger.info("discover status=start user_id=%s target_companies=%s", getattr(profile, "user_id", None), len(profile.target_companies or []))
+async def discover_jobs(
+    profile: UserProfile,
+    seen_hashes: set[str] | None = None,
+) -> list[RawJob]:
+    from app.pipeline.jsearch import run_jsearch
+
+    user_id = getattr(profile, "user_id", None)
+    logger.info("discover status=start user_id=%s target_companies=%s", user_id, len(profile.target_companies or []))
     ats_tasks = []
-    registry = _load_company_registry()
+    registry = _filter_registry_by_domain(_load_company_registry(), getattr(profile, "domains", None))
     seen_registry_keys = {
         (company.get("ats", ""), company.get("token", ""))
         for company in profile.target_companies or []
         if company.get("ats") and company.get("token")
     }
+    known_company_names = {
+        company.get("name", "")
+        for company in (profile.target_companies or []) + registry
+        if company.get("name")
+    }
 
     async with httpx.AsyncClient() as client:
-        for company in profile.target_companies or []:
-            task = _queue_ats_fetch(company, client)
-            if task is not None:
-                ats_tasks.append(task)
+        if settings.ENABLE_ATS_SEARCH:
+            for company in profile.target_companies or []:
+                task = _queue_ats_fetch(company, client)
+                if task is not None:
+                    ats_tasks.append(task)
 
-        for company in registry:
-            key = (company.get("ats", ""), company.get("token", ""))
-            if key in seen_registry_keys:
-                continue
-            task = _queue_ats_fetch(company, client)
-            if task is not None:
-                ats_tasks.append(task)
+            for company in registry:
+                key = (company.get("ats", ""), company.get("token", ""))
+                if key in seen_registry_keys:
+                    continue
+                task = _queue_ats_fetch(company, client)
+                if task is not None:
+                    ats_tasks.append(task)
+        else:
+            logger.info("discover status=ats_skipped reason=ats_disabled user_id=%s", user_id)
 
-        ats_results, search_results = await asyncio.gather(
+        ats_results, jsearch_results, search_results = await asyncio.gather(
             asyncio.gather(*ats_tasks, return_exceptions=True) if ats_tasks else asyncio.sleep(0, result=[]),
-            _run_react_search_agent(profile),
+            run_jsearch(profile, client, api_key=settings.JSEARCH_API_KEY),
+            _run_react_search_agent(profile, exclude_companies=known_company_names),
         )
 
     all_jobs: list[RawJob] = []
@@ -477,7 +626,17 @@ async def discover_jobs(profile: UserProfile) -> list[RawJob]:
             all_jobs.extend(result)
         else:
             logger.debug("discover_jobs ats result exception=%r", result)
+    all_jobs.extend(jsearch_results)
     all_jobs.extend(search_results)
     unique = _dedup_jobs(all_jobs)
-    logger.info("discover status=complete user_id=%s raw=%s unique=%s", getattr(profile, "user_id", None), len(all_jobs), len(unique))
+    before_seen = len(unique)
+    if seen_hashes:
+        unique = _filter_seen(unique, seen_hashes)
+    logger.info(
+        "discover status=complete user_id=%s raw=%s unique=%s after_seen_filter=%s",
+        user_id,
+        len(all_jobs),
+        before_seen,
+        len(unique),
+    )
     return unique

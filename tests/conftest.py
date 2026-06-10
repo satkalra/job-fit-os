@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///./test.db")
 os.environ["SIGNUP_TOKEN"] = ""
 
-from app.database import Base, engine  # noqa: E402
+from app.database import AsyncSessionLocal, Base, engine  # noqa: E402
 from app.main import app  # noqa: E402
 
 
@@ -35,3 +35,16 @@ async def created_user():
         )
     data = resp.json()
     return data["user_id"], data["management_token"]
+
+
+@pytest_asyncio.fixture
+async def db_session():
+    async with AsyncSessionLocal() as session:
+        yield session
+        await session.rollback()
+
+
+@pytest_asyncio.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as test_client:
+        yield test_client

@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from sqlalchemy import select
@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models.job import JobResult
 from app.models.user import User, UserProfile
-from app.pipeline.discover import discover_jobs
+from app.pipeline.discover import _job_hash, discover_jobs
 from app.pipeline.score import score_jobs_debug
 from app.schemas.job import BriefingRunResult
 from app.routers.users import _verify_management_token
@@ -62,7 +62,17 @@ async def run_briefing(
             user_id, profile.seniority, profile.preferred_locations, profile.countries,
             profile.needs_sponsorship, len(profile.target_companies or []),
         )
-        jobs = await discover_jobs(profile)
+        cutoff = date.today() - timedelta(days=30)
+        seen_hash_rows = (
+            await db.execute(
+                select(JobResult.job_hash).where(
+                    JobResult.user_id == user_id,
+                    JobResult.run_date >= cutoff,
+                    JobResult.job_hash.isnot(None),
+                )
+            )
+        ).scalars().all()
+        jobs = await discover_jobs(profile, seen_hashes=set(seen_hash_rows))
         logger.info("briefing status=discovered user_id=%s jobs=%s", user_id, len(jobs))
         scored, pipeline = await score_jobs_debug(jobs, profile, profile.resume_text)
         logger.info("briefing status=pipeline user_id=%s %s", user_id, pipeline)
@@ -89,6 +99,7 @@ async def run_briefing(
                     citations=job.citations,
                     summary=job.summary,
                     rewrite_token=job.rewrite_token,
+                    job_hash=_job_hash(job.company or "", job.title or ""),
                 )
             )
         await db.commit()

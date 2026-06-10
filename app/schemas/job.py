@@ -32,6 +32,12 @@ class BriefingRunResult(BaseModel):
     email_sent: bool
 
 
+class ApplyResponse(BaseModel):
+    job_id: str
+    status: str
+    applied_at: str | None
+
+
 class CustomJobScoreRequest(BaseModel):
     job_description: str | None = None
     url: str | None = None

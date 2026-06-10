@@ -1,4 +1,4 @@
-from app.utils.aliases import expand_location, expand_role, normalize_company
+from app.utils.aliases import ROLE_ALIASES, expand_location, expand_role, normalize_company
 
 
 def test_normalize_company_strips_suffix():
@@ -52,3 +52,23 @@ def test_expand_role_alias_lookup():
 def test_expand_role_unknown_passthrough():
     result = expand_role("glassblower")
     assert "glassblower" in result
+
+
+def test_analyst_alias_exists():
+    assert "analyst" in ROLE_ALIASES
+
+
+def test_analyst_expands_to_variants():
+    expanded = expand_role("analyst")
+    assert "business analyst" in expanded
+    assert "data analyst" in expanded
+    assert "strategy analyst" in expanded
+
+
+def test_ba_expands():
+    assert "business analyst" in expand_role("ba")
+
+
+def test_finance_expands():
+    assert "financial analyst" in expand_role("finance")
+    assert "fp&a" in expand_role("finance")

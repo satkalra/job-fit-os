@@ -81,3 +81,28 @@ class WeightsUpdate(BaseModel):
         if abs(total - 1.0) > 0.01:
             raise ValueError(f"Weights must sum to 1.0, got {total:.4f}")
         return v
+
+
+class UsageDayBreakdown(BaseModel):
+    date: str
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+
+
+class UsageStageBreakdown(BaseModel):
+    stage: str
+    cost_usd: float
+    input_tokens: int
+    output_tokens: int
+    calls: int
+
+
+class UsageSummaryResponse(BaseModel):
+    user_id: str
+    period_days: int
+    total_cost_usd: float
+    total_input_tokens: int
+    total_output_tokens: int
+    by_stage: list[UsageStageBreakdown]
+    by_day: list[UsageDayBreakdown]

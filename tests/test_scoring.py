@@ -1,3 +1,6 @@
+import random
+
+from app.pipeline.score import _select_for_scoring
 from app.schemas.job import RawJob
 from app.utils.scoring import gate_filter, keyword_overlap_score
 
@@ -47,3 +50,27 @@ def test_gate_filter_keeps_no_salary_info():
 def test_gate_filter_rejects_old_posted_date():
     job = RawJob(title="Senior Engineer", company="Acme", posted_date="2025-01-01", source="ats")
     assert len(gate_filter([job], seniority="senior", min_salary=None)) == 0
+
+
+def _jobs(n: int) -> list[RawJob]:
+    return [RawJob(title=f"Job {i}", company="Co", description="sql python analyst tableau") for i in range(n)]
+
+
+def test_select_fewer_than_limit_returns_all():
+    assert len(_select_for_scoring(_jobs(6), limit=10)) == 6
+
+
+def test_select_exactly_limit_returns_all():
+    assert len(_select_for_scoring(_jobs(10), limit=10)) == 10
+
+
+def test_select_over_limit_returns_limit():
+    assert len(_select_for_scoring(_jobs(20), limit=10)) == 10
+
+
+def test_select_over_limit_includes_deterministic_top():
+    random.seed(42)
+    selected_a = _select_for_scoring(_jobs(30), limit=10)
+    random.seed(99)
+    selected_b = _select_for_scoring(_jobs(30), limit=10)
+    assert [job.title for job in selected_a[:7]] == [job.title for job in selected_b[:7]]

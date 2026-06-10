@@ -15,16 +15,21 @@ LOCATION_ALIASES: dict[str, set[str]] = {
 }
 
 ROLE_ALIASES: dict[str, set[str]] = {
-    "swe": {"software engineer", "software developer", "software development"},
-    "ml": {"machine learning", "ml engineer", "mlops"},
-    "ai": {"artificial intelligence", "ai engineer"},
-    "pm": {"product manager", "product management"},
+    "swe": {"software engineer", "software developer", "software development", "software engineering"},
+    "ml": {"machine learning", "ml engineer", "mlops", "machine learning engineer"},
+    "ai": {"artificial intelligence", "ai engineer", "ai researcher"},
+    "pm": {"product manager", "product management", "product owner"},
     "ds": {"data scientist", "data science"},
-    "de": {"data engineer", "data engineering"},
-    "fe": {"frontend", "front-end", "front end"},
-    "be": {"backend", "back-end", "back end"},
-    "devops": {"platform engineer", "infrastructure", "sre", "site reliability"},
-    "em": {"engineering manager", "eng manager"},
+    "de": {"data engineer", "data engineering", "analytics engineer"},
+    "fe": {"frontend", "front-end", "front end", "frontend engineer", "frontend developer"},
+    "be": {"backend", "back-end", "back end", "backend engineer", "backend developer"},
+    "devops": {"platform engineer", "infrastructure", "sre", "site reliability", "devops engineer", "cloud engineer"},
+    "em": {"engineering manager", "eng manager", "engineering lead"},
+    "analyst": {"business analyst", "data analyst", "strategy analyst", "operations analyst", "product analyst", "growth analyst", "insights analyst"},
+    "ba": {"business analyst", "business analysis", "business intelligence analyst"},
+    "finance": {"financial analyst", "fp&a", "financial planning", "finance analyst", "corporate finance"},
+    "ops": {"operations analyst", "operations manager", "biz ops", "business operations", "strategy & operations"},
+    "quant": {"quantitative analyst", "quantitative researcher", "quant researcher", "risk analyst"},
 }
 
 COMPANY_SUFFIXES: set[str] = {

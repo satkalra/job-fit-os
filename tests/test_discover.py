@@ -5,7 +5,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.models.user import UserProfile
-from app.pipeline.discover import _dedup_jobs, _run_react_search_agent, discover_jobs
+from app.pipeline.discover import (
+    _build_react_scout_prompt,
+    _dedup_jobs,
+    _filter_registry_by_domain,
+    _filter_seen,
+    _job_hash,
+    _run_react_search_agent,
+    discover_jobs,
+)
 from app.schemas.job import RawJob
 
 
@@ -15,6 +23,8 @@ def make_profile():
     profile.target_companies = [{"name": "Anthropic", "ats": "greenhouse", "token": "anthropic"}]
     profile.keywords = "python fastapi llm"
     profile.preferred_locations = None
+    profile.countries = []
+    profile.seniority = "senior"
     return profile
 
 
@@ -91,7 +101,7 @@ async def test_discover_fetches_registry_entries():
 
 
 @pytest.mark.asyncio
-async def test_react_zero_iter_parses_text_jobs():
+async def test_react_zero_iter_ignores_text_jobs():
     profile = make_profile()
     response = _text_response(
         '[{"title":"ML Engineer","company":"Acme","location":"Remote","url":"https://example.com","description":"python","posted_date":null}]'
@@ -100,8 +110,7 @@ async def test_react_zero_iter_parses_text_jobs():
         with patch("app.pipeline.discover._anthropic.messages.create", new=AsyncMock(return_value=response)):
             jobs = await _run_react_search_agent(profile)
 
-    assert len(jobs) == 1
-    assert jobs[0].company == "Acme"
+    assert jobs == []
 
 
 @pytest.mark.asyncio
@@ -118,8 +127,7 @@ async def test_react_single_web_search_continues_without_client_dispatch():
             with patch("app.pipeline.discover._company_lookup", new=AsyncMock()) as mock_lookup:
                 jobs = await _run_react_search_agent(profile)
 
-    assert len(jobs) == 1
-    assert jobs[0].company == "SearchCo"
+    assert jobs == []
     assert mock_create.await_count == 2
     mock_lookup.assert_not_awaited()
 
@@ -142,7 +150,7 @@ async def test_react_company_lookup_resolves_jobs():
 
 
 @pytest.mark.asyncio
-async def test_react_does_not_double_extract_response_text_jobs():
+async def test_react_does_not_extract_response_text_jobs():
     profile = make_profile()
     responses = [
         _tool_and_text_response(
@@ -158,8 +166,7 @@ async def test_react_does_not_double_extract_response_text_jobs():
             with patch("app.pipeline.discover._company_lookup", new=AsyncMock(return_value=[])):
                 jobs = await _run_react_search_agent(profile)
 
-    assert len(jobs) == 1
-    assert jobs[0].company == "Acme"
+    assert jobs == []
 
 
 @pytest.mark.asyncio
@@ -195,14 +202,14 @@ async def test_react_handles_pause_turn():
 
     second_messages = mock_create.await_args_list[1].kwargs["messages"]
     assert second_messages[-1] == {"role": "user", "content": []}
-    assert len(jobs) == 1
+    assert jobs == []
 
 
 @pytest.mark.asyncio
 async def test_react_wall_clock_timeout_returns_empty():
     profile = make_profile()
 
-    async def slow_inner(_profile):
+    async def slow_inner(_profile, _exclude_companies):
         await asyncio.sleep(1)
         return [RawJob(title="Engineer", company="LateCo")]
 
@@ -216,6 +223,8 @@ async def test_react_wall_clock_timeout_returns_empty():
 
 @pytest.mark.asyncio
 async def test_discover_skips_ats_for_name_only_company():
+    """Company with name-only (no ats/token) should not trigger an ATS fetch.
+    JSearch calls are separate; we patch run_jsearch to isolate ATS behaviour."""
     profile = UserProfile()
     profile.domains = ["Software Engineering"]
     profile.keywords = "python"
@@ -223,13 +232,14 @@ async def test_discover_skips_ats_for_name_only_company():
     profile.target_companies = [{"name": "Stripe"}]
 
     with patch("app.pipeline.discover._load_company_registry", return_value=[]):
-        with patch("app.pipeline.discover.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_client_cls.return_value = mock_client
-            with patch("app.pipeline.discover._run_react_search_agent", return_value=[]):
-                result = await discover_jobs(profile)
+        with patch("app.pipeline.discover._run_react_search_agent", return_value=[]):
+            with patch("app.pipeline.jsearch.run_jsearch", return_value=[]):
+                with patch("app.pipeline.discover.httpx.AsyncClient") as mock_client_cls:
+                    mock_client = AsyncMock()
+                    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                    mock_client.__aexit__ = AsyncMock(return_value=False)
+                    mock_client_cls.return_value = mock_client
+                    result = await discover_jobs(profile)
 
     mock_client.get.assert_not_called()
     assert result == []
@@ -237,6 +247,8 @@ async def test_discover_skips_ats_for_name_only_company():
 
 @pytest.mark.asyncio
 async def test_discover_still_fetches_ats_when_token_present():
+    """Company with ats+token should trigger exactly one ATS fetch (Greenhouse).
+    JSearch is patched out to isolate ATS call count."""
     profile = UserProfile()
     profile.domains = ["Software Engineering"]
     profile.keywords = "python"
@@ -247,16 +259,95 @@ async def test_discover_still_fetches_ats_when_token_present():
     ]
 
     with patch("app.pipeline.discover._load_company_registry", return_value=[]):
-        with patch("app.pipeline.discover.httpx.AsyncClient") as mock_client_cls:
-            mock_client = AsyncMock()
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            mock_resp = MagicMock()
-            mock_resp.json.return_value = {"jobs": []}
-            mock_resp.raise_for_status = MagicMock()
-            mock_client.get = AsyncMock(return_value=mock_resp)
-            mock_client_cls.return_value = mock_client
-            with patch("app.pipeline.discover._run_react_search_agent", return_value=[]):
-                await discover_jobs(profile)
+        with patch("app.pipeline.discover._run_react_search_agent", return_value=[]):
+            with patch("app.pipeline.jsearch.run_jsearch", return_value=[]):
+                with patch("app.pipeline.discover.httpx.AsyncClient") as mock_client_cls:
+                    mock_client = AsyncMock()
+                    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+                    mock_client.__aexit__ = AsyncMock(return_value=False)
+                    mock_resp = MagicMock()
+                    mock_resp.json.return_value = {"jobs": []}
+                    mock_resp.raise_for_status = MagicMock()
+                    mock_client.get = AsyncMock(return_value=mock_resp)
+                    mock_client_cls.return_value = mock_client
+                    await discover_jobs(profile)
 
     assert mock_client.get.call_count == 1
+
+
+def test_scout_prompt_does_not_ask_for_json():
+    profile = make_profile()
+    profile.domains = ["analyst"]
+    profile.preferred_locations = ["NYC"]
+    prompt = _build_react_scout_prompt(profile, exclude_companies=set())
+    assert "do not output json" in prompt.lower()
+    assert "company_lookup" in prompt
+
+
+def test_scout_prompt_excludes_known_companies():
+    profile = make_profile()
+    prompt = _build_react_scout_prompt(profile, exclude_companies={"Scale AI", "GitLab"})
+    assert "Scale AI" in prompt
+    assert "GitLab" in prompt
+
+
+def test_scout_prompt_includes_domain():
+    profile = make_profile()
+    profile.domains = ["business analyst", "data analyst"]
+    prompt = _build_react_scout_prompt(profile, exclude_companies=set())
+    assert "business analyst" in prompt.lower() or "analyst" in prompt.lower()
+
+
+def test_job_hash_is_16_chars():
+    assert len(_job_hash("Scale AI", "Data Analyst")) == 16
+
+
+def test_job_hash_same_company_title_same_hash():
+    assert _job_hash("Scale AI", "Data Analyst") == _job_hash("Scale AI", "Data Analyst")
+
+
+def test_job_hash_case_insensitive():
+    assert _job_hash("scale ai", "data analyst") == _job_hash("Scale AI", "Data Analyst")
+
+
+def test_job_hash_different_company_different_hash():
+    assert _job_hash("Stripe", "Data Analyst") != _job_hash("Scale AI", "Data Analyst")
+
+
+def test_filter_seen_removes_by_hash():
+    job = RawJob(title="Data Analyst", company="Scale AI", url=None)
+    result = _filter_seen([job], seen_hashes={_job_hash("Scale AI", "Data Analyst")})
+    assert result == []
+
+
+def test_filter_seen_keeps_new_job():
+    job = RawJob(title="Data Analyst", company="Stripe", url=None)
+    result = _filter_seen([job], seen_hashes={_job_hash("Scale AI", "Data Analyst")})
+    assert len(result) == 1
+
+
+def test_filter_seen_empty_set_passes_all():
+    jobs = [RawJob(title="Analyst", company="Acme"), RawJob(title="PM", company="Other")]
+    assert len(_filter_seen(jobs, seen_hashes=set())) == 2
+
+
+def test_filter_registry_matches_domain():
+    registry = [
+        {"name": "Stripe", "ats": "greenhouse", "token": "stripe", "domains": ["fintech", "engineering"]},
+        {"name": "dbt Labs", "ats": "greenhouse", "token": "dbt", "domains": ["analytics", "data"]},
+        {"name": "Vercel", "ats": "greenhouse", "token": "vercel", "domains": ["engineering"]},
+    ]
+    result = _filter_registry_by_domain(registry, ["analytics", "data"])
+    assert len(result) == 1
+    assert result[0]["name"] == "dbt Labs"
+
+
+def test_filter_registry_falls_back_to_all_on_no_match():
+    registry = [{"name": "Stripe", "ats": "greenhouse", "token": "stripe", "domains": ["fintech"]}]
+    result = _filter_registry_by_domain(registry, ["quantum_computing"])
+    assert len(result) == 1
+
+
+def test_filter_registry_no_profile_domains_returns_all():
+    registry = [{"name": "X", "ats": "greenhouse", "token": "x", "domains": ["engineering"]}]
+    assert len(_filter_registry_by_domain(registry, None)) == 1

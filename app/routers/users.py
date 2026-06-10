@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile
 from jose import jwt
@@ -9,8 +9,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.database import get_db
+from app.models.usage import UsageEvent
 from app.models.user import User, UserProfile
-from app.schemas.user import ProfilePatch, ResumeTextUpload, UserCreate, WeightsUpdate
+from app.schemas.user import (
+    ProfilePatch,
+    ResumeTextUpload,
+    UsageDayBreakdown,
+    UsageStageBreakdown,
+    UsageSummaryResponse,
+    UserCreate,
+    WeightsUpdate,
+)
 from app.services.pdf_extractor import extract_resume_text
 
 router = APIRouter(prefix="/users", tags=["users"])
@@ -158,6 +167,75 @@ async def update_weights(
     await db.commit()
     logger.info("updated weights user_id=%s", user_id)
     return {"weights_updated": True, "new_weights": body.model_dump()}
+
+
+@router.get("/{user_id}/usage", response_model=UsageSummaryResponse)
+async def get_usage_summary(
+    user_id: uuid.UUID,
+    days: int = 30,
+    authorization: str = Header(...),
+    db: AsyncSession = Depends(get_db),
+):
+    _verify_management_token(authorization.removeprefix("Bearer "), user_id)
+    if days < 1 or days > 366:
+        raise HTTPException(422, "days must be between 1 and 366")
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (
+        await db.execute(
+            select(UsageEvent)
+            .where(UsageEvent.user_id == user_id, UsageEvent.created_at >= cutoff)
+            .order_by(UsageEvent.created_at.asc())
+        )
+    ).scalars().all()
+
+    stage_map: dict[str, dict] = {}
+    day_map: dict[str, dict] = {}
+    for row in rows:
+        stage = stage_map.setdefault(
+            row.stage,
+            {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0, "calls": 0},
+        )
+        stage["cost_usd"] += row.cost_usd
+        stage["input_tokens"] += row.input_tokens
+        stage["output_tokens"] += row.output_tokens
+        stage["calls"] += 1
+
+        day_key = row.created_at.date().isoformat()
+        day = day_map.setdefault(day_key, {"cost_usd": 0.0, "input_tokens": 0, "output_tokens": 0})
+        day["cost_usd"] += row.cost_usd
+        day["input_tokens"] += row.input_tokens
+        day["output_tokens"] += row.output_tokens
+
+    by_stage = [
+        UsageStageBreakdown(
+            stage=stage,
+            cost_usd=round(values["cost_usd"], 6),
+            input_tokens=values["input_tokens"],
+            output_tokens=values["output_tokens"],
+            calls=values["calls"],
+        )
+        for stage, values in stage_map.items()
+    ]
+    by_day = [
+        UsageDayBreakdown(
+            date=day,
+            cost_usd=round(values["cost_usd"], 6),
+            input_tokens=values["input_tokens"],
+            output_tokens=values["output_tokens"],
+        )
+        for day, values in sorted(day_map.items())
+    ]
+
+    return UsageSummaryResponse(
+        user_id=str(user_id),
+        period_days=days,
+        total_cost_usd=round(sum(row.cost_usd for row in rows), 6),
+        total_input_tokens=sum(row.input_tokens for row in rows),
+        total_output_tokens=sum(row.output_tokens for row in rows),
+        by_stage=by_stage,
+        by_day=by_day,
+    )
 
 
 @router.post("/{user_id}/resume/upload")
