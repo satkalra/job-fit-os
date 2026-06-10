@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "DEBUG"
     LOG_COLOR: str = "auto"
     SIGNUP_TOKEN: str = ""
+    ADMIN_TOKEN: str = ""
     ENABLE_REACT_SEARCH: bool = True
     ENABLE_ATS_SEARCH: bool = False
 

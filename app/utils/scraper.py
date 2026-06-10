@@ -1,11 +1,40 @@
+import ipaddress
 import logging
+import socket
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 import httpx
 
 logger = logging.getLogger(__name__)
 
 _MIN_TEXT_LENGTH = 100
+
+
+def _is_safe_url(url: str) -> bool:
+    """Reject non-http(s) URLs and URLs that resolve to private/internal IPs (SSRF guard)."""
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        host = parsed.hostname
+        if not host:
+            return False
+        for info in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM):
+            ip = ipaddress.ip_address(info[4][0])
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_unspecified
+                or ip.is_multicast
+            ):
+                logger.warning("scraper ssrf_blocked url=%s ip=%s", url, ip)
+                return False
+        return True
+    except Exception:
+        return False
 
 
 class _TextExtractor(HTMLParser):
@@ -34,9 +63,21 @@ class _TextExtractor(HTMLParser):
 
 
 async def fetch_job_description(url: str) -> str | None:
+    if not _is_safe_url(url):
+        logger.warning("scraper rejected unsafe url=%s", url)
+        return None
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
+        async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
             response = await client.get(url)
+        # Follow one level of redirect only if target also passes SSRF check
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("location", "")
+            if location and _is_safe_url(location):
+                async with httpx.AsyncClient(follow_redirects=False, timeout=10) as client:
+                    response = await client.get(location)
+            else:
+                logger.info("scraper redirect_blocked url=%s location=%s", url, location)
+                return None
         if response.status_code >= 400:
             logger.info("scraper http_error url=%s status=%s", url, response.status_code)
             return None
